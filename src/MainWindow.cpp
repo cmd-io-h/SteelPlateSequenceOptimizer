@@ -375,11 +375,11 @@ void MainWindow::buildUi()
     warehouseLayout->addWidget(warehouseTable_, 1);
 
     scheduleTable_ = new QTableWidget(resultTabs_);
-    scheduleTable_->setColumnCount(7);
+    scheduleTable_->setColumnCount(9);
     scheduleTable_->setHorizontalHeaderLabels({
-        QStringLiteral("钢板组"), QStringLiteral("材质"), QStringLiteral("规格(厚×宽)"),
-        QStringLiteral("钢板长度"), QStringLiteral("工件数"), QStringLiteral("已用长度"),
-        QStringLiteral("当前钢板组内的工件")
+        QStringLiteral("钢板明细"), QStringLiteral("材质"), QStringLiteral("规格(厚×宽)"),
+        QStringLiteral("钢板编号"), QStringLiteral("工件数"), QStringLiteral("已用长度(mm)"),
+        QStringLiteral("余料(mm)"), QStringLiteral("利用率"), QStringLiteral("工件名称")
     });
     configureResultTable(scheduleTable_);
 
@@ -1099,34 +1099,77 @@ void MainWindow::applyWarehouseFilters()
     }
 }
 
-// 按排产顺序逐工件展示钢板信息和原表整行数据
+// 按参考明细格式展示排产工件，并将搭焊和套管合并为组队
 void MainWindow::populateScheduleTable()
 {
     scheduleTable_->clearContents();
     QStringList headers = {
-        QStringLiteral("钢板组"), QStringLiteral("材质"), QStringLiteral("规格(厚×宽)"),
-        QStringLiteral("钢板长度"), QStringLiteral("工件数"), QStringLiteral("已用长度"),
-        QStringLiteral("当前工件")
+        QStringLiteral("钢板明细"), QStringLiteral("材质"), QStringLiteral("规格(厚×宽)"),
+        QStringLiteral("钢板编号"), QStringLiteral("工件数"), QStringLiteral("已用长度(mm)"),
+        QStringLiteral("余料(mm)"), QStringLiteral("利用率"), QStringLiteral("工件名称")
     };
-    const QStringList mergedHeaders = {
-        QStringLiteral("钢板明细"), QStringLiteral("钢板组"),
-        QStringLiteral("材质"), QStringLiteral("规格"), QStringLiteral("规格(厚×宽)"),
-        QStringLiteral("宽度"), QStringLiteral("宽度(mm)"),
-        QStringLiteral("厚度"), QStringLiteral("厚度(mm)"),
-        QStringLiteral("钢板编号"), QStringLiteral("钢板长度"), QStringLiteral("钢板长度(mm)"),
-        QStringLiteral("工件数"), QStringLiteral("工件数量"),
-        QStringLiteral("已用长度"), QStringLiteral("已用长度(mm)"),
-        QStringLiteral("余料"), QStringLiteral("余料(mm)"), QStringLiteral("利用率"),
-        QStringLiteral("工件名称"), QStringLiteral("管名")
+    const bool useGeneratedDetail = workbookData_.generatedFromRaw &&
+        !workbookData_.generatedHeaders.isEmpty();
+    const QVector<QString>& detailHeaders = useGeneratedDetail
+        ? workbookData_.generatedHeaders : workbookData_.sourceHeaders;
+    const auto compactHeader = [](QString text) {
+        text = text.trimmed();
+        text.remove(QLatin1Char(' '));
+        return text;
     };
-    QVector<int> sourceColumns;
-    for (int column = 0; column < workbookData_.sourceHeaders.size(); ++column) {
-        QString header = workbookData_.sourceHeaders[column].trimmed();
-        QString compact = header;
-        compact.remove(QLatin1Char(' '));
-        if (mergedHeaders.contains(compact)) continue;
-        sourceColumns.append(column);
-        headers.append(header);
+    const bool hasReferenceLayout = detailHeaders.size() > 30 &&
+        compactHeader(detailHeaders[0]) == QStringLiteral("钢板明细") &&
+        compactHeader(detailHeaders[9]) == QStringLiteral("工件名称");
+    QVector<int> detailColumns;
+    int lapWeldColumn = -1;
+    int sleeveColumn = -1;
+    if (hasReferenceLayout) {
+        // 前九列由当前排产结果重新生成，从序号开始保留参考表字段顺序
+        for (int column = 10; column < detailHeaders.size(); ++column) {
+            const QString header = compactHeader(detailHeaders[column]);
+            if (column == 18 || column == 19) continue;
+            if (header == QStringLiteral("搭焊")) {
+                lapWeldColumn = column;
+                detailColumns.append(-1);
+                headers.append(QStringLiteral("组队"));
+                continue;
+            }
+            if (header == QStringLiteral("套管")) {
+                sleeveColumn = column;
+                continue;
+            }
+            detailColumns.append(column);
+            headers.append(detailHeaders[column].trimmed());
+        }
+    } else {
+        // 非标准明细仍保留原表字段，只合并搭焊和套管
+        const QStringList mergedHeaders = {
+            QStringLiteral("钢板明细"), QStringLiteral("钢板组"),
+            QStringLiteral("材质"), QStringLiteral("规格"), QStringLiteral("规格(厚×宽)"),
+            QStringLiteral("宽度"), QStringLiteral("宽度(mm)"),
+            QStringLiteral("厚度"), QStringLiteral("厚度(mm)"),
+            QStringLiteral("钢板编号"), QStringLiteral("钢板长度"), QStringLiteral("钢板长度(mm)"),
+            QStringLiteral("工件数"), QStringLiteral("工件数量"),
+            QStringLiteral("已用长度"), QStringLiteral("已用长度(mm)"),
+            QStringLiteral("余料"), QStringLiteral("余料(mm)"), QStringLiteral("利用率"),
+            QStringLiteral("工件名称"), QStringLiteral("管名")
+        };
+        for (int column = 0; column < detailHeaders.size(); ++column) {
+            const QString header = compactHeader(detailHeaders[column]);
+            if (mergedHeaders.contains(header)) continue;
+            if (header == QStringLiteral("搭焊")) {
+                lapWeldColumn = column;
+                detailColumns.append(-1);
+                headers.append(QStringLiteral("组队"));
+                continue;
+            }
+            if (header == QStringLiteral("套管")) {
+                sleeveColumn = column;
+                continue;
+            }
+            detailColumns.append(column);
+            headers.append(detailHeaders[column].trimmed());
+        }
     }
     scheduleTable_->setColumnCount(headers.size());
     scheduleTable_->setHorizontalHeaderLabels(headers);
@@ -1146,20 +1189,53 @@ void MainWindow::populateScheduleTable()
             const WorkpieceProcessData& workpiece = plate.workpieces[itemIndex];
             const QString workpieceId = workpiece.workpieceId.trimmed().isEmpty()
                 ? QStringLiteral("工件%1").arg(itemIndex + 1) : workpiece.workpieceId;
+            const double residual = std::max(0.0, plate.stockLength - plate.usedLength);
+            const double utilization = plate.stockLength > 0.0
+                ? plate.usedLength / plate.stockLength : 0.0;
             QStringList values = {
                 itemIndex == 0 ? plate.plateId : QString(),
-                plate.material, plate.specification,
-                numberText(plate.stockLength), QString::number(plate.workpieceCount),
-                numberText(plate.usedLength), workpieceId
+                itemIndex == 0 ? plate.material : QString(),
+                itemIndex == 0 ? plate.specification : QString(),
+                itemIndex == 0 ? QString::number(plate.plateNumber) : QString(),
+                itemIndex == 0 ? QString::number(plate.workpieceCount) : QString(),
+                itemIndex == 0 ? numberText(plate.usedLength) : QString(),
+                itemIndex == 0 ? numberText(residual) : QString(),
+                itemIndex == 0 ? QString::number(utilization * 100.0, 'f', 1) +
+                    QStringLiteral("%") : QString(),
+                workpieceId
             };
-            for (int sourceColumn : sourceColumns) {
-                values.append(sourceColumn < workpiece.sourceValues.size()
-                    ? workpiece.sourceValues[sourceColumn].toString().trimmed()
-                    : QString());
+            const QVector<QVariant>& detailValues = useGeneratedDetail &&
+                itemIndex < plate.generatedRows.size()
+                ? plate.generatedRows[itemIndex] : workpiece.sourceValues;
+            const auto detailText = [&detailValues](int column) {
+                return column >= 0 && column < detailValues.size()
+                    ? detailValues[column].toString().trimmed() : QString();
+            };
+            // 按搭焊数量加套管数量计算组队总数
+            const auto groupingText = [&detailText, lapWeldColumn, sleeveColumn]() {
+                const QStringList rawValues = {
+                    detailText(lapWeldColumn), detailText(sleeveColumn)
+                };
+                double numericTotal = 0.0;
+                bool hasNumericValue = false;
+                for (const QString& rawValue : rawValues) {
+                    const QString text = rawValue.trimmed();
+                    if (text.isEmpty()) continue;
+                    bool ok = false;
+                    const double number = text.toDouble(&ok);
+                    if (ok) {
+                        numericTotal += number;
+                        hasNumericValue = true;
+                    }
+                }
+                return hasNumericValue ? numberText(numericTotal) : QString();
+            };
+            for (int detailColumn : detailColumns) {
+                values.append(detailColumn < 0 ? groupingText() : detailText(detailColumn));
             }
             for (int column = 0; column < values.size(); ++column) {
                 QTableWidgetItem* item = new QTableWidgetItem(values[column]);
-                if (column >= 3 && column <= 5) {
+                if (column >= 3 && column <= 7) {
                     item->setTextAlignment(Qt::AlignCenter);
                 }
                 scheduleTable_->setItem(row, column, item);
@@ -1167,7 +1243,7 @@ void MainWindow::populateScheduleTable()
         }
     }
     scheduleTable_->resizeColumnsToContents();
-    for (int column = 6; column < scheduleTable_->columnCount(); ++column) {
+    for (int column = 8; column < scheduleTable_->columnCount(); ++column) {
         if (scheduleTable_->columnWidth(column) > 360) {
             scheduleTable_->setColumnWidth(column, 360);
         }
