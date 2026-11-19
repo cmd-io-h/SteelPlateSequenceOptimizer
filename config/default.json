@@ -1,0 +1,100 @@
+{
+    "inputMode": "auto",
+    "rawWorksheetName": "",
+    "worksheetName": "钢板明细",
+    "plateMarkerPattern": "^G",
+    "outputSuffix": "_钢板明细_流水线均衡",
+    "headerRow": 1,
+    "columns": {
+        "plateId": 1,
+        "material": 2,
+        "plateWidth": 3,
+        "plateThickness": 4,
+        "plateNumber": 5,
+        "usedLength": 7,
+        "remainingLength": 8,
+        "specification": 19,
+        "bevelCount": 25,
+        "lapWeldCount": 30,
+        "rawSpecification": 11,
+        "rawMaterial": 12,
+        "rawLength": 15,
+        "rawBevel": 16,
+        "rawOnlineAuto": 20,
+        "rawOnlineManual": 21
+    },
+    "nesting": {
+        "groupByMaterial": true,
+        "groupByThickness": true,
+        "groupByWidth": true,
+        "defaultStockLength": 6000,
+        "kerf": 0,
+        "endAllowance": 0,
+        "lengthThresholds": [0],
+        "stockLengthRules": []
+    },
+    "weldRouting": {
+        "manualRanges": [
+            { "min": 22, "max": 34 }
+        ],
+        "robotRanges": [
+            { "min": 42, "max": 60 }
+        ],
+        "mediumRanges": [
+            { "min": 76, "max": 114 }
+        ],
+        "largeRanges": [
+            { "min": 140, "max": 377 }
+        ]
+    },
+    "balance": {
+        "bevel": {
+            "enabled": true,
+            "priority": 1,
+            "weight": 1.0,
+            "tolerance": 0.02
+        },
+        "manualWeld": {
+            "enabled": true,
+            "priority": 2,
+            "weight": 1.0,
+            "tolerance": 0.02
+        },
+        "robotWeld": {
+            "enabled": true,
+            "priority": 2,
+            "weight": 1.0,
+            "tolerance": 0.02
+        },
+        "prefixBalanceWeight": 2.0,
+        "adjacentLoadWeight": 4.0,
+        "rollingWindowWeight": 0.4,
+        "rollingWindow": 5,
+        "highLoadFactor": 1.0,
+        "localSearchIterations": 2500
+    },
+    "timing": {
+        "downstreamMinimumLength": 600,
+        "bufferCapacity": 3,
+        "sprayIncrementSeconds": 18,
+        "sawFeedSpeedMmPerSecond": 200,
+        "sawFirstFeedSeconds": 10,
+        "sawMaximumFeedSeconds": 10,
+        "sawClampSeconds": 2,
+        "sawReleaseSeconds": 2,
+        "sawUnloadSeconds": 15,
+        "sawPlateResetSeconds": 30,
+        "sawCutSecondsUnder35": 8,
+        "sawCutSecondsUnder61": 12,
+        "sawCutSecondsUnder90": 13,
+        "sawCutSecondsOther": 15,
+        "bevelStationCount": 1,
+        "bevelCycleSeconds": 85,
+        "tackCycleSeconds": 160,
+        "manualWeldStationCount": 2,
+        "manualWeldCycleSeconds": 178,
+        "robotWeldStationCount": 2,
+        "robotWeldFixedSeconds": 109,
+        "robotWeldSpeedMmPerSecond": 5
+    }
+}

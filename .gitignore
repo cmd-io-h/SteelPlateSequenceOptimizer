@@ -1,0 +1,31 @@
+# Visual Studio 和 Qt 生成目录
+/.vs/
+/bin/
+/obj/
+/build-verify/
+/test-output/
+
+# 用户环境和编译中间文件
+*.vcxproj.user
+*.suo
+*.user
+*.user.*
+*.VC.db
+*.VC.VC.opendb
+*.ipch
+*.pdb
+*.ilk
+*.exp
+*.tlog
+*.lastbuildstate
+*.recipe
+*.log
+
+# 本地业务数据和导出结果
+*.xlsx
+*.xls
+*.error.txt
+
+# 系统文件
+Thumbs.db
+.DS_Store

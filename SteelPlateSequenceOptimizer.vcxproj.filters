@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="源文件">
+      <UniqueIdentifier>{BDA522D4-5C4F-4EA7-80E4-72F745106E0F}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx</Extensions>
+    </Filter>
+    <Filter Include="头文件">
+      <UniqueIdentifier>{429E5D5D-A0EB-49C2-9AB8-DC7977A38A84}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx</Extensions>
+    </Filter>
+    <Filter Include="配置">
+      <UniqueIdentifier>{44DD3ED9-1E54-4608-B806-FEE03010F7D1}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\main.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\MainWindow.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\OptimizerConfig.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\SequenceOptimizer.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\TimelineSimulator.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\WorkbookService.cpp"><Filter>源文件</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\MainWindow.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\OptimizerConfig.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\SequenceOptimizer.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\SteelPlateModel.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\TimelineSimulator.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\WorkbookService.h"><Filter>头文件</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="config\default.json"><Filter>配置</Filter></None>
+    <None Include="README.md"><Filter>配置</Filter></None>
+  </ItemGroup>
+</Project>
