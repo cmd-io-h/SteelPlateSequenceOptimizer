@@ -166,9 +166,9 @@ QVector<QVariant> transformRawDetail(
         value(config.columns.rawOnlineManual - 1).toString());
     const int lapValue = textCount(online, QStringLiteral("搭焊"));
     const int buttWeld = textCount(online, QStringLiteral("对焊"));
+    const int sleeveValue = textCount(online, QStringLiteral("套管"));
     QVariant sleeve;
-    if (buttWeld > 0) sleeve = buttWeld;
-    else if (online.contains(QStringLiteral("套管"))) sleeve = 0;
+    if (buttWeld + sleeveValue > 0) sleeve = buttWeld + sleeveValue;
 
     QVector<QVariant> detail;
     detail.reserve(39);
