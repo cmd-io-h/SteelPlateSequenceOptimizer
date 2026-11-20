@@ -26,20 +26,23 @@ struct TimelineEntry
     double bevelFinish = -1.0; // 保存完成坡口工序的时间
     double bevelDuration = 0.0; // 保存坡口加工时长
     double bevelBlockedSeconds = 0.0; // 保存坡口缓冲区堵塞时间
-    double tackArrival = -1.0; // 保存进入人工组对工序的时间
-    double tackFinish = -1.0; // 保存完成人工组对工序的时间
-    double tackDuration = 0.0; // 保存人工组对加工时长
-    double tackBlockedSeconds = 0.0; // 保存人工组对缓冲区堵塞时间
-    double weldArrival = -1.0; // 保存进入接焊工序的时间
-    double weldFinish = -1.0; // 保存完成接焊工序的时间
-    double weldDuration = 0.0; // 保存接焊加工时长
-    double weldBlockedSeconds = 0.0; // 保存接焊工位缓冲区堵塞时间
+    double tackArrival = -1.0; // 保存进入人工组队工序的时间
+    double tackFinish = -1.0; // 保存完成人工组队工序的时间
+    double tackDuration = 0.0; // 保存人工组队加工时长
+    double tackBlockedSeconds = 0.0; // 保存人工组队缓冲区堵塞时间
+    double outerWeldArrival = -1.0; // 保存进入外圈接焊工序的时间
+    double outerWeldFinish = -1.0; // 保存完成外圈接焊工序的时间
+    double outerWeldDuration = 0.0; // 保存外圈接焊加工时长
+    double weldBlockedSeconds = 0.0; // 保存外圈完成后因中间缓冲区满产生的堵塞时间
+    double innerWeldArrival = -1.0; // 保存进入内圈接焊工序的时间
+    double innerWeldFinish = -1.0; // 保存完成内圈接焊工序的时间
+    double innerWeldDuration = 0.0; // 保存内圈接焊加工时长
     double sortingArrival = -1.0; // 保存进入分拣工序的时间
     double sortingFinish = -1.0; // 保存完成分拣工序的时间
     double finishTime = 0.0; // 保存工件全部工序完成时间
     QString weldRoute; // 保存工件接焊路线
-    QString station; // 保存工件分配的接焊工位
-    double blockedSeconds = 0.0; // 保存工件累计堵塞时间，暂时统一为零
+    QString station; // 保存工件采用的接焊路线
+    double blockedSeconds = 0.0; // 保存工件累计堵塞时间
 };
 
 // 保存整批排产完成后的时序汇总结果
@@ -51,6 +54,18 @@ struct TimelineSummary
     double totalBufferBlockedSeconds = 0.0; // 保存全部工件累计缓冲区堵塞时间
     int bufferFullEvents = 0; // 保存缓冲区填满事件次数
     int maximumBufferedWorkpieces = 0; // 保存缓冲区内工件数量峰值
+    double bevelQueueWaitSeconds = 0.0; // 保存坡口工序累计排队等待时间
+    double tackQueueWaitSeconds = 0.0; // 保存组队工序累计排队等待时间
+    double manualOuterQueueWaitSeconds = 0.0; // 保存人工外圈接焊累计排队等待时间
+    double manualInnerQueueWaitSeconds = 0.0; // 保存人工内圈接焊累计排队等待时间
+    double robotOuterQueueWaitSeconds = 0.0; // 保存机器外圈接焊累计排队等待时间
+    double robotInnerQueueWaitSeconds = 0.0; // 保存机器内圈接焊累计排队等待时间
+    double manualBufferBlockedSeconds = 0.0; // 保存人工焊中间缓冲区累计堵塞时间
+    double robotBufferBlockedSeconds = 0.0; // 保存机器焊中间缓冲区累计堵塞时间
+    int manualBufferFullEvents = 0; // 保存人工焊中间缓冲区填满次数
+    int robotBufferFullEvents = 0; // 保存机器焊中间缓冲区填满次数
+    int manualMaximumBufferedWorkpieces = 0; // 保存人工焊中间缓冲区工件数量峰值
+    int robotMaximumBufferedWorkpieces = 0; // 保存机器焊中间缓冲区工件数量峰值
 };
 
 // 按固定排产顺序模拟工件通过整条流水线的过程

@@ -34,7 +34,7 @@ struct WorkpieceProcessData
     double length = 0.0; // 保存工件长度
     double width = 0.0; // 保存工件管径宽度
     double bevelCount = 0.0; // 保存工件坡口负荷
-    double lapWeldCount = 0.0; // 保存工件搭焊负荷
+    double lapWeldCount = 0.0; // 保存工件搭焊、对焊和套管合计的组队数量
     QVector<QVariant> sourceValues; // 保存工件原表整行字段
 };
 
@@ -47,14 +47,14 @@ struct SteelPlateBlock
     QString plateId; // 保存钢板唯一编号
     int plateNumber = 0; // 保存钢板组内编号
     QString material; // 保存钢板材质
-    QString specification; // 保存钢板厚度与宽度规格
+    QString specification; // 保存钢板宽度X厚度规格
     double width = 0.0; // 保存钢板宽度
     double thickness = 0.0; // 保存钢板厚度
     double stockLength = 0.0; // 保存钢板原料长度
     double usedLength = 0.0; // 保存工件占用总长度
     int workpieceCount = 0; // 保存钢板内工件数量
     double bevelCount = 0.0; // 保存钢板坡口总负荷
-    double lapWeldCount = 0.0; // 保存钢板搭焊总负荷
+    double lapWeldCount = 0.0; // 保存钢板组队总数量
     double manualWeldCount = 0.0; // 保存钢板人工接焊总负荷
     double robotWeldCount = 0.0; // 保存钢板机器接焊总负荷
     double unclassifiedWeldCount = 0.0; // 保存未识别焊接路线的负荷

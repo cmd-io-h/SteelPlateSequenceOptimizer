@@ -91,9 +91,7 @@
         "bevelStationCount": 1,
         "bevelCycleSeconds": 85,
         "tackCycleSeconds": 160,
-        "manualWeldStationCount": 2,
         "manualWeldCycleSeconds": 178,
-        "robotWeldStationCount": 2,
         "robotWeldFixedSeconds": 109,
         "robotWeldSpeedMmPerSecond": 5
     }

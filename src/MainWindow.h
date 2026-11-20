@@ -41,7 +41,7 @@ private:
     void applyWarehouseFilters(); // 按筛选条件显示立库数据
     void populateScheduleTable(); // 填充工件排产表格
     void populateTimelineTable(); // 填充各工序时序表格
-    bool isDiameterSelected(double width) const; // 判断当前管径是否参与排产
+    bool isSmallDiameter(double width) const; // 判断工件是否属于当前支持的小径范围
     void updateParameterSummary(); // 更新主界面的参数摘要
     void appendMetrics(const QString& title, const BalanceMetrics& metrics, int plateCount); // 将均衡指标写入日志
     QString locateDefaultConfig() const; // 查找默认参数配置文件
@@ -79,9 +79,7 @@ private:
     QSpinBox* bevelStationCountSpin_ = nullptr;
     QDoubleSpinBox* bevelCycleSpin_ = nullptr;
     QDoubleSpinBox* tackCycleSpin_ = nullptr;
-    QSpinBox* manualWeldStationCountSpin_ = nullptr;
     QDoubleSpinBox* manualWeldCycleSpin_ = nullptr;
-    QSpinBox* robotWeldStationCountSpin_ = nullptr;
     QDoubleSpinBox* robotWeldFixedSpin_ = nullptr;
     QDoubleSpinBox* robotWeldSpeedSpin_ = nullptr;
     // 结果页面和筛选控件

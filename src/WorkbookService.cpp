@@ -118,13 +118,20 @@ int textCount(const QString& text, const QString& token)
     return count;
 }
 
+// 按搭焊文字累计搭焊次数
+int lapWeldCount(const QString& value)
+{
+    return textCount(value.trimmed(), QStringLiteral("搭焊"));
+}
+
 // 按照坡口文字和标记字符计算坡口数量
 int bevelCount(const QString& value)
 {
     const QString text = value.trimmed().toUpper();
     int count = textCount(text, QStringLiteral("坡口"));
     for (QChar character : text) {
-        if (character == QLatin1Char('M') || character == QLatin1Char('H')) ++count;
+        if (character == QLatin1Char('M') || character == QLatin1Char('H') ||
+            character == QLatin1Char('W')) ++count;
     }
     return count;
 }
@@ -164,7 +171,7 @@ QVector<QVariant> transformRawDetail(
     const QString online = chooseOnlineInfo(
         value(config.columns.rawOnlineAuto - 1).toString(),
         value(config.columns.rawOnlineManual - 1).toString());
-    const int lapValue = textCount(online, QStringLiteral("搭焊"));
+    const int lapValue = lapWeldCount(online);
     const int buttWeld = textCount(online, QStringLiteral("对焊"));
     const int sleeveValue = textCount(online, QStringLiteral("套管"));
     QVariant sleeve;
@@ -182,7 +189,7 @@ QVector<QVariant> transformRawDetail(
     detail << sleeve;
     for (int index = 21; index < 38; ++index) detail << value(index + 1);
     if (bevel) *bevel = bevelValue;
-    if (lapWeld) *lapWeld = lapValue;
+    if (lapWeld) *lapWeld = lapValue + buttWeld + sleeveValue;
     return detail;
 }
 
@@ -227,16 +234,26 @@ double usedLengthOf(
     return used;
 }
 
-// 计算工件对人工接焊路线产生的负荷
-double manualWeldLoad(const RawWorkpiece& item, const OptimizerConfig& config)
+// 按实际节拍计算工件的坡口负荷
+double bevelProcessLoad(const RawWorkpiece& item, const OptimizerConfig& config)
 {
-    return config.isManualWeldWidth(item.width) ? item.lapWeldCount : 0.0;
+    return item.bevelCount > Epsilon ? config.bevelCycleSeconds : 0.0;
 }
 
-// 计算工件对机器接焊路线产生的负荷
+// 计算工件对人工组队和内外圈人工接焊路线产生的总负荷
+double manualWeldLoad(const RawWorkpiece& item, const OptimizerConfig& config)
+{
+    if (item.lapWeldCount <= Epsilon || !config.isManualWeldWidth(item.width)) return 0.0;
+    return config.tackCycleSeconds + 2.0 * config.manualWeldCycleSeconds;
+}
+
+// 计算工件对人工组队和内外圈机器接焊路线产生的总负荷
 double robotWeldLoad(const RawWorkpiece& item, const OptimizerConfig& config)
 {
-    return config.isRobotWeldWidth(item.width) ? item.lapWeldCount : 0.0;
+    if (item.lapWeldCount <= Epsilon || !config.isRobotWeldWidth(item.width)) return 0.0;
+    const double singlePass = config.robotWeldFixedSeconds + item.width * 3.14 /
+        std::max(0.01, config.robotWeldSpeedMmPerSecond);
+    return config.tackCycleSeconds + 2.0 * singlePass;
 }
 
 // 判断工件是否需要进入坡口或焊接后续工序
@@ -322,7 +339,7 @@ QVector<NestingBin> redistributeFixedCount(
     int totalDownstreamItems = 0;
     for (int itemIndex : itemIndexes) {
         const RawWorkpiece& item = records[itemIndex];
-        totalBevel += item.bevelCount;
+        totalBevel += bevelProcessLoad(item, config);
         totalManualWeld += manualWeldLoad(item, config);
         totalRobotWeld += robotWeldLoad(item, config);
         if (requiresDownstreamProcess(item)) ++totalDownstreamItems;
@@ -362,13 +379,13 @@ QVector<NestingBin> redistributeFixedCount(
             score += 2.0 * (bins[binIndex].itemIndexes.size() + 1) / std::max(1.0, itemTarget);
 
             // 计算工件放入当前钢板后的坡口、人工接焊、机器接焊负荷
-            double binBevel = records[itemIndex].bevelCount;
+            double binBevel = bevelProcessLoad(records[itemIndex], config);
             double binManualWeld = manualWeldLoad(records[itemIndex], config);
             double binRobotWeld = robotWeldLoad(records[itemIndex], config);
             int binDownstreamItems = requiresDownstreamProcess(records[itemIndex]) ? 1 : 0;
             for (int existing : bins[binIndex].itemIndexes) {
                 const RawWorkpiece& item = records[existing];
-                binBevel += item.bevelCount;
+                binBevel += bevelProcessLoad(item, config);
                 binManualWeld += manualWeldLoad(item, config);
                 binRobotWeld += robotWeldLoad(item, config);
                 if (requiresDownstreamProcess(item)) ++binDownstreamItems;
@@ -397,7 +414,7 @@ QVector<NestingBin> redistributeFixedCount(
             };
             addProcessBalance(config.bevelObjective, binBevel, totalBevel);
             addProcessBalance(config.manualWeldObjective, binManualWeld, totalManualWeld);
-            addProcessBalance(config.manualWeldObjective, binRobotWeld, totalRobotWeld);
+            addProcessBalance(config.robotWeldObjective, binRobotWeld, totalRobotWeld);
 
             score += 0.1 * (bins[binIndex].used + increment) / std::max(1.0, capacity);
             if (score < bestScore - Epsilon ||
@@ -480,7 +497,7 @@ QVector<NestingBin> redistributeFixedCount(
             int downstreamItems = 0;
             for (int existing : bin.itemIndexes) {
                 const RawWorkpiece& item = records[existing];
-                bevel += item.bevelCount;
+                bevel += bevelProcessLoad(item, config);
                 manualWeld += manualWeldLoad(item, config);
                 robotWeld += robotWeldLoad(item, config);
                 if (requiresDownstreamProcess(item)) ++downstreamItems;
@@ -502,7 +519,7 @@ QVector<NestingBin> redistributeFixedCount(
             };
             addProcessVariance(config.bevelObjective, bevel, totalBevel);
             addProcessVariance(config.manualWeldObjective, manualWeld, totalManualWeld);
-            addProcessVariance(config.manualWeldObjective, robotWeld, totalRobotWeld);
+            addProcessVariance(config.robotWeldObjective, robotWeld, totalRobotWeld);
         }
         return score;
     };
@@ -767,8 +784,8 @@ bool loadPlateDetail(
         if (config.isManualWeldWidth(block.width)) block.manualWeldCount = block.lapWeldCount;
         else if (config.isRobotWeldWidth(block.width)) block.robotWeldCount = block.lapWeldCount;
         else block.unclassifiedWeldCount = block.lapWeldCount;
-        if (block.specification.isEmpty() && block.width > 0.0 && block.thickness > 0.0) {
-            block.specification = numberText(block.thickness) + QStringLiteral("×") + numberText(block.width);
+        if (block.width > 0.0 && block.thickness > 0.0) {
+            block.specification = numberText(block.width) + QStringLiteral("X") + numberText(block.thickness);
         }
         result.validWorkpieceCount += block.workpieceCount;
         result.plates.append(block);
@@ -915,87 +932,56 @@ bool loadRawAndNest(
 
         for (int binIndex = 0; binIndex < bins.size(); ++binIndex) {
             NestingBin& bin = bins[binIndex];
-            QVector<int> manualWeldItems;
-            QVector<int> robotWeldItems;
-            QVector<int> unclassifiedWeldItems;
-            QVector<int> noWeldItems;
-            for (int itemIndex : bin.itemIndexes) {
-                const RawWorkpiece& item = records[itemIndex];
-                if (item.lapWeldCount <= Epsilon) {
-                    noWeldItems.append(itemIndex);
-                } else if (config.isManualWeldWidth(item.width)) {
-                    manualWeldItems.append(itemIndex);
-                } else if (config.isRobotWeldWidth(item.width)) {
-                    robotWeldItems.append(itemIndex);
-                } else {
-                    unclassifiedWeldItems.append(itemIndex);
-                }
-            }
             auto byDescendingLength = [&records](int left, int right) {
                 if (std::abs(records[left].length - records[right].length) > Epsilon) {
                     return records[left].length > records[right].length;
                 }
                 return records[left].sourceRow < records[right].sourceRow;
             };
-            std::sort(manualWeldItems.begin(), manualWeldItems.end(), byDescendingLength);
-            std::sort(robotWeldItems.begin(), robotWeldItems.end(), byDescendingLength);
-            std::sort(unclassifiedWeldItems.begin(), unclassifiedWeldItems.end(), byDescendingLength);
-            std::sort(noWeldItems.begin(), noWeldItems.end(), byDescendingLength);
+            QVector<int> remainingItems = bin.itemIndexes;
+            std::sort(remainingItems.begin(), remainingItems.end(), byDescendingLength);
             bin.itemIndexes.clear();
-            bin.itemIndexes.reserve(manualWeldItems.size() + robotWeldItems.size() +
-                unclassifiedWeldItems.size() + noWeldItems.size());
+            bin.itemIndexes.reserve(remainingItems.size());
             bool hasPreviousBevel = false;
             bool previousHasBevel = false;
-            QVector<QVector<int>*> weldPattern = {
-                &manualWeldItems, &noWeldItems,
-                &robotWeldItems, &noWeldItems,
-                &unclassifiedWeldItems, &noWeldItems
-            };
-            int weldPatternPosition = 0;
-            auto hasBevelState = [&](const QVector<int>& candidates, bool hasBevel) {
-                for (int itemIndex : candidates) {
-                    if ((records[itemIndex].bevelCount > Epsilon) == hasBevel) return true;
-                }
-                return false;
-            };
-            auto hasAnyBevelState = [&](bool hasBevel) {
-                return hasBevelState(manualWeldItems, hasBevel) ||
-                    hasBevelState(robotWeldItems, hasBevel) ||
-                    hasBevelState(unclassifiedWeldItems, hasBevel) ||
-                    hasBevelState(noWeldItems, hasBevel);
-            };
-            // 先确定坡口交替目标，再在符合坡口状态的工件中匹配焊接循环
-            // 焊接循环依次为人工焊、非焊接、机器焊、非焊接
-            // 同条件下保留长度降序，类别不足时选择最接近的可行顺序
-            while (!manualWeldItems.isEmpty() || !robotWeldItems.isEmpty() ||
-                   !unclassifiedWeldItems.isEmpty() || !noWeldItems.isEmpty()) {
+            bool hasPreviousWeld = false;
+            bool previousHasWeld = false;
+            // 钢板内先交替坡口状态，再交替焊接需求，同条件下保持长度降序
+            while (!remainingItems.isEmpty()) {
                 const bool desiredBevel = hasPreviousBevel ? !previousHasBevel : true;
-                const bool targetBevel = hasAnyBevelState(desiredBevel)
-                    ? desiredBevel : !desiredBevel;
-                int selectedPatternPosition = -1;
-                for (int offset = 0; offset < weldPattern.size(); ++offset) {
-                    const int candidatePosition =
-                        (weldPatternPosition + offset) % weldPattern.size();
-                    if (hasBevelState(*weldPattern[candidatePosition], targetBevel)) {
-                        selectedPatternPosition = candidatePosition;
+                bool targetBevel = !desiredBevel;
+                for (int itemIndex : remainingItems) {
+                    if ((records[itemIndex].bevelCount > Epsilon) == desiredBevel) {
+                        targetBevel = desiredBevel;
                         break;
                     }
                 }
-                if (selectedPatternPosition < 0) break;
-                QVector<int>& candidates = *weldPattern[selectedPatternPosition];
+                const bool desiredWeld = hasPreviousWeld ? !previousHasWeld : true;
                 int selectedItemPosition = 0;
-                for (int index = 0; index < candidates.size(); ++index) {
-                    if ((records[candidates[index]].bevelCount > Epsilon) == targetBevel) {
+                bool foundWeldMatch = false;
+                for (int index = 0; index < remainingItems.size(); ++index) {
+                    const RawWorkpiece& item = records[remainingItems[index]];
+                    if ((item.bevelCount > Epsilon) != targetBevel) continue;
+                    if ((item.lapWeldCount > Epsilon) == desiredWeld) {
                         selectedItemPosition = index;
+                        foundWeldMatch = true;
                         break;
                     }
                 }
-                const int itemIndex = candidates.takeAt(selectedItemPosition);
+                if (!foundWeldMatch) {
+                    for (int index = 0; index < remainingItems.size(); ++index) {
+                        if ((records[remainingItems[index]].bevelCount > Epsilon) == targetBevel) {
+                            selectedItemPosition = index;
+                            break;
+                        }
+                    }
+                }
+                const int itemIndex = remainingItems.takeAt(selectedItemPosition);
                 bin.itemIndexes.append(itemIndex);
                 previousHasBevel = records[itemIndex].bevelCount > Epsilon;
                 hasPreviousBevel = true;
-                weldPatternPosition =
-                    (selectedPatternPosition + 1) % weldPattern.size();
+                previousHasWeld = records[itemIndex].lapWeldCount > Epsilon;
+                hasPreviousWeld = true;
             }
             SteelPlateBlock block;
             block.originalIndex = plateSerial++;
@@ -1005,7 +991,7 @@ bool loadRawAndNest(
             block.width = groupWidth;
             block.thickness = groupThickness;
             block.specification = groupWidth > 0.0 && groupThickness > 0.0
-                ? numberText(groupThickness) + QStringLiteral("×") + numberText(groupWidth)
+                ? numberText(groupWidth) + QStringLiteral("X") + numberText(groupThickness)
                 : QStringLiteral("混合规格");
             block.stockLength = stockLength;
             block.usedLength = bin.used + config.endAllowance;
@@ -1359,6 +1345,13 @@ bool WorkbookService::exportResultTables(
     bodyFormat.setBorderStyle(QXlsx::Format::BorderThin);
     bodyFormat.setBorderColor(QColor(QStringLiteral("#D0D0D0")));
 
+    QXlsx::Format numericFormat = bodyFormat;
+    numericFormat.setNumberFormat(QStringLiteral("0.##"));
+    QXlsx::Format percentFormat = bodyFormat;
+    percentFormat.setNumberFormat(QStringLiteral("0.0%"));
+    QXlsx::Format clockFormat = bodyFormat;
+    clockFormat.setNumberFormat(QStringLiteral("[h]:mm:ss"));
+
     QXlsx::Format headerFormat = bodyFormat;
     headerFormat.setFontBold(true);
     headerFormat.setFontSize(11);
@@ -1400,10 +1393,21 @@ bool WorkbookService::exportResultTables(
             const QVector<QVariant>& values = source.rows[row];
             for (int column = 0; column < source.headers.size(); ++column) {
                 const QVariant value = column < values.size() ? values[column] : QVariant();
+                const QString header = source.headers[column].trimmed();
+                const bool percentColumn = header.contains(QStringLiteral("利用率"));
+                const bool clockColumn =
+                    (header.contains(QStringLiteral("进入")) ||
+                     header.contains(QStringLiteral("完成"))) &&
+                    header.endsWith(QStringLiteral("时间"));
+                const bool numericValue = value.type() == QVariant::Double ||
+                    value.type() == QVariant::Int || value.type() == QVariant::LongLong ||
+                    value.type() == QVariant::UInt || value.type() == QVariant::ULongLong;
+                const QXlsx::Format& format = percentColumn ? percentFormat
+                    : (clockColumn ? clockFormat : (numericValue ? numericFormat : bodyFormat));
                 if (!value.isValid() || value.isNull() || value.toString().isEmpty()) {
-                    worksheet->writeBlank(row + 2, column + 1, bodyFormat);
+                    worksheet->writeBlank(row + 2, column + 1, format);
                 } else {
-                    worksheet->write(row + 2, column + 1, value, bodyFormat);
+                    worksheet->write(row + 2, column + 1, value, format);
                     columnWidths[column] = std::max(
                         columnWidths[column], displayTextWidth(value.toString()));
                 }

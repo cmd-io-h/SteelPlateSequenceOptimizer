@@ -76,7 +76,7 @@ struct OptimizerConfig
     QVector<double> lengthThresholds { 0.0 }; // 0 表示默认不启用长短分界
     QVector<StockLengthRule> stockLengthRules;
 
-    // 焊接路线，小径人工单独统计，小径机器、中径和大径合并为机器接焊负荷
+    // 焊接路线，当前计算只保留小径人工和小径机器路线
     QVector<WidthRange> manualWeldRanges { { 22.0, 34.0 } };
     QVector<WidthRange> robotWeldRanges { { 42.0, 60.0 } };
     QVector<WidthRange> mediumWeldRanges { { 76.0, 114.0 } };
@@ -111,11 +111,9 @@ struct OptimizerConfig
     int bevelStationCount = 1;
     double bevelCycleSeconds = 85.0;
     double tackCycleSeconds = 160.0;
-    int manualWeldStationCount = 2;
-    double manualWeldCycleSeconds = 178.0;
-    int robotWeldStationCount = 2;
-    double robotWeldFixedSeconds = 109.0;
-    double robotWeldSpeedMmPerSecond = 5.0;
+    double manualWeldCycleSeconds = 178.0; // 外圈和内圈分别执行一次
+    double robotWeldFixedSeconds = 109.0; // 单道机器接焊固定动作时间
+    double robotWeldSpeedMmPerSecond = 5.0; // 单道机器接焊速度
 
     static OptimizerConfig defaults(); // 创建默认参数配置
     static bool loadFromFile(const QString& path, OptimizerConfig* config, QString* errorMessage); // 从文件读取参数配置

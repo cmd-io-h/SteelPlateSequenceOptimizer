@@ -292,12 +292,8 @@ bool OptimizerConfig::loadFromFile(
     result.bevelStationCount = readInt(timing, "bevelStationCount", result.bevelStationCount);
     result.bevelCycleSeconds = readDouble(timing, "bevelCycleSeconds", result.bevelCycleSeconds);
     result.tackCycleSeconds = readDouble(timing, "tackCycleSeconds", result.tackCycleSeconds);
-    result.manualWeldStationCount = readInt(
-        timing, "manualWeldStationCount", result.manualWeldStationCount);
     result.manualWeldCycleSeconds = readDouble(
         timing, "manualWeldCycleSeconds", result.manualWeldCycleSeconds);
-    result.robotWeldStationCount = readInt(
-        timing, "robotWeldStationCount", result.robotWeldStationCount);
     result.robotWeldFixedSeconds = readDouble(
         timing, "robotWeldFixedSeconds", result.robotWeldFixedSeconds);
     result.robotWeldSpeedMmPerSecond = readDouble(
@@ -388,9 +384,7 @@ bool OptimizerConfig::saveToFile(const QString& path, QString* errorMessage) con
     timingObject.insert(QStringLiteral("bevelStationCount"), bevelStationCount);
     timingObject.insert(QStringLiteral("bevelCycleSeconds"), bevelCycleSeconds);
     timingObject.insert(QStringLiteral("tackCycleSeconds"), tackCycleSeconds);
-    timingObject.insert(QStringLiteral("manualWeldStationCount"), manualWeldStationCount);
     timingObject.insert(QStringLiteral("manualWeldCycleSeconds"), manualWeldCycleSeconds);
-    timingObject.insert(QStringLiteral("robotWeldStationCount"), robotWeldStationCount);
     timingObject.insert(QStringLiteral("robotWeldFixedSeconds"), robotWeldFixedSeconds);
     timingObject.insert(QStringLiteral("robotWeldSpeedMmPerSecond"), robotWeldSpeedMmPerSecond);
 
@@ -520,8 +514,7 @@ bool OptimizerConfig::validate(QString* errorMessage) const
         sawCutSecondsUnder35 < 0.0 || sawCutSecondsUnder61 < 0.0 ||
         sawCutSecondsUnder90 < 0.0 || sawCutSecondsOther < 0.0 ||
         bevelStationCount <= 0 || bevelCycleSeconds < 0.0 ||
-        tackCycleSeconds < 0.0 || manualWeldStationCount <= 0 ||
-        manualWeldCycleSeconds < 0.0 || robotWeldStationCount <= 0 ||
+        tackCycleSeconds < 0.0 || manualWeldCycleSeconds < 0.0 ||
         robotWeldFixedSeconds < 0.0 || robotWeldSpeedMmPerSecond <= 0.0) {
         if (errorMessage) *errorMessage = QStringLiteral("时序参数设置不正确。");
         return false;

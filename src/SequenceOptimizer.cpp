@@ -7,11 +7,20 @@
 
 namespace
 {
+constexpr double Epsilon = 1e-7;
+
 enum class LoadStream
 {
     Bevel,
     ManualWeld,
     RobotWeld
+};
+
+enum class WeldRouteKind
+{
+    None,
+    Manual,
+    Robot
 };
 
 struct PriorityScore
@@ -21,15 +30,40 @@ struct PriorityScore
     double tolerance = 0.0;
 };
 
-// 读取钢板在指定流水线负荷上的数量
-double loadOf(const SteelPlateBlock& plate, LoadStream stream)
+// 按单个工件的实际路线计算指定工序的时间负荷
+double workpieceLoadOf(
+    const WorkpieceProcessData& item,
+    LoadStream stream,
+    const OptimizerConfig& config)
 {
-    switch (stream) {
-    case LoadStream::Bevel: return plate.bevelCount;
-    case LoadStream::ManualWeld: return plate.manualWeldCount;
-    case LoadStream::RobotWeld: return plate.robotWeldCount;
+    if (item.length + Epsilon < config.downstreamMinimumLength) return 0.0;
+    if (stream == LoadStream::Bevel && item.bevelCount > Epsilon) {
+        return config.bevelCycleSeconds;
+    }
+    if (stream == LoadStream::ManualWeld &&
+        item.lapWeldCount > Epsilon && config.isManualWeldWidth(item.width)) {
+        return 2.0 * config.manualWeldCycleSeconds;
+    }
+    if (stream == LoadStream::RobotWeld &&
+        item.lapWeldCount > Epsilon && config.isRobotWeldWidth(item.width)) {
+        const double singlePass = config.robotWeldFixedSeconds + item.width * 3.14 /
+            std::max(0.01, config.robotWeldSpeedMmPerSecond);
+        return 2.0 * singlePass;
     }
     return 0.0;
+}
+
+// 按实际工序节拍计算钢板在指定流水线上的时间负荷
+double loadOf(
+    const SteelPlateBlock& plate,
+    LoadStream stream,
+    const OptimizerConfig& config)
+{
+    double load = 0.0;
+    for (const WorkpieceProcessData& item : plate.workpieces) {
+        load += workpieceLoadOf(item, stream, config);
+    }
+    return load;
 }
 
 // 返回指定流水线负荷对应的均衡参数
@@ -49,11 +83,178 @@ QVector<LoadStream> streams()
     return { LoadStream::Bevel, LoadStream::ManualWeld, LoadStream::RobotWeld };
 }
 
+// 按钢板上的主要接焊负荷判断人工或机器路线
+WeldRouteKind weldRouteOf(
+    const SteelPlateBlock& plate,
+    const OptimizerConfig& config)
+{
+    double manualLoad = 0.0;
+    double robotLoad = 0.0;
+    for (const WorkpieceProcessData& item : plate.workpieces) {
+        manualLoad += workpieceLoadOf(item, LoadStream::ManualWeld, config);
+        robotLoad += workpieceLoadOf(item, LoadStream::RobotWeld, config);
+    }
+    if (manualLoad <= Epsilon && robotLoad <= Epsilon) return WeldRouteKind::None;
+    return manualLoad >= robotLoad
+        ? WeldRouteKind::Manual : WeldRouteKind::Robot;
+}
+
+// 按本批人工和机器钢板数量生成等比例穿插的目标路线
+QVector<WeldRouteKind> targetWeldRouteSequence(
+    const QVector<SteelPlateBlock>& plates,
+    const OptimizerConfig& config)
+{
+    int manualCount = 0;
+    int robotCount = 0;
+    int noneCount = 0;
+    for (const SteelPlateBlock& plate : plates) {
+        const WeldRouteKind route = weldRouteOf(plate, config);
+        if (route == WeldRouteKind::Manual) ++manualCount;
+        if (route == WeldRouteKind::Robot) ++robotCount;
+        if (route == WeldRouteKind::None) ++noneCount;
+    }
+
+    QVector<WeldRouteKind> weldSequence;
+    weldSequence.reserve(manualCount + robotCount);
+    const WeldRouteKind reliefRoute = robotCount >= manualCount
+        ? WeldRouteKind::Robot : WeldRouteKind::Manual;
+    if (manualCount == 0 || robotCount == 0) {
+        const WeldRouteKind onlyRoute = manualCount > 0
+            ? WeldRouteKind::Manual : WeldRouteKind::Robot;
+        for (int index = 0; index < manualCount + robotCount; ++index) {
+            weldSequence.append(onlyRoute);
+        }
+    } else {
+        const bool robotDominant = robotCount >= manualCount;
+        const int dominantCount = robotDominant ? robotCount : manualCount;
+        const int minorCount = robotDominant ? manualCount : robotCount;
+        const WeldRouteKind dominantRoute = robotDominant
+            ? WeldRouteKind::Robot : WeldRouteKind::Manual;
+        const WeldRouteKind minorRoute = robotDominant
+            ? WeldRouteKind::Manual : WeldRouteKind::Robot;
+        const int baseGroupSize = dominantCount / minorCount;
+        const int extraDominant = dominantCount % minorCount;
+        int remainderAccumulator = 0;
+
+        for (int group = 0; group < minorCount; ++group) {
+            int groupSize = baseGroupSize;
+            remainderAccumulator += extraDominant;
+            if (remainderAccumulator >= minorCount) {
+                ++groupSize;
+                remainderAccumulator -= minorCount;
+            }
+            for (int index = 0; index < groupSize; ++index) {
+                weldSequence.append(dominantRoute);
+            }
+            weldSequence.append(minorRoute);
+        }
+    }
+
+    QVector<WeldRouteKind> result = weldSequence;
+    result.reserve(plates.size());
+    const int finalCount = weldSequence.size() + noneCount;
+    for (int noneIndex = 0; noneIndex < noneCount; ++noneIndex) {
+        if (result.isEmpty()) {
+            result.append(WeldRouteKind::None);
+            continue;
+        }
+        const double desiredPosition = static_cast<double>(noneIndex + 1) *
+            finalCount / (noneCount + 1.0);
+        int bestInsertPosition = -1;
+        int bestRunLength = -1;
+        bool bestUsesReliefRoute = false;
+        double bestDistance = std::numeric_limits<double>::max();
+        int position = 0;
+        while (position < result.size()) {
+            if (result[position] == WeldRouteKind::None) {
+                ++position;
+                continue;
+            }
+            const int runStart = position;
+            const WeldRouteKind route = result[position];
+            while (position < result.size() && result[position] == route) ++position;
+            const int runLength = position - runStart;
+            const int insertPosition = runStart + (runLength + 1) / 2;
+            const bool usesReliefRoute = route == reliefRoute;
+            const double distance = std::abs(insertPosition - desiredPosition);
+            if ((usesReliefRoute && !bestUsesReliefRoute) ||
+                (usesReliefRoute == bestUsesReliefRoute &&
+                 runLength > bestRunLength) ||
+                (usesReliefRoute == bestUsesReliefRoute &&
+                 runLength == bestRunLength && distance < bestDistance)) {
+                bestInsertPosition = insertPosition;
+                bestRunLength = runLength;
+                bestUsesReliefRoute = usesReliefRoute;
+                bestDistance = distance;
+            }
+        }
+        if (bestInsertPosition < 0) bestInsertPosition = result.size();
+        result.insert(bestInsertPosition, WeldRouteKind::None);
+    }
+    return result;
+}
+
+// 比较当前焊接钢板顺序与本批等比例目标路线的偏差
+double weldRouteProportionPenalty(
+    const QVector<SteelPlateBlock>& plates,
+    const QVector<int>& order,
+    const OptimizerConfig& config)
+{
+    const QVector<WeldRouteKind> target = targetWeldRouteSequence(plates, config);
+    int routePosition = 0;
+    int mismatchCount = 0;
+    for (int plateIndex : order) {
+        const WeldRouteKind route = weldRouteOf(plates[plateIndex], config);
+        if (routePosition >= target.size() || route != target[routePosition]) {
+            ++mismatchCount;
+        }
+        ++routePosition;
+    }
+    return routePosition > 0
+        ? static_cast<double>(mismatchCount) / routePosition : 0.0;
+}
+
+// 连续同路线越长惩罚越高，促使人工和机器接焊钢板交替进入流水线
+double weldRouteRunPenalty(
+    const QVector<SteelPlateBlock>& plates,
+    const QVector<int>& order,
+    const OptimizerConfig& config)
+{
+    WeldRouteKind previous = WeldRouteKind::None;
+    int runLength = 0;
+    double penalty = 0.0;
+    auto closeRun = [&]() {
+        if (runLength > 1) {
+            const double repeated = runLength - 1.0;
+            penalty += repeated * repeated;
+        }
+        runLength = 0;
+        previous = WeldRouteKind::None;
+    };
+    for (int plateIndex : order) {
+        const WeldRouteKind route = weldRouteOf(plates[plateIndex], config);
+        if (route == WeldRouteKind::None) {
+            closeRun();
+        } else if (route == previous) {
+            ++runLength;
+        } else {
+            closeRun();
+            previous = route;
+            runLength = 1;
+        }
+    }
+    closeRun();
+    return penalty;
+}
+
 // 统计全部钢板在指定负荷上的总量
-double totalLoad(const QVector<SteelPlateBlock>& plates, LoadStream stream)
+double totalLoad(
+    const QVector<SteelPlateBlock>& plates,
+    LoadStream stream,
+    const OptimizerConfig& config)
 {
     double total = 0.0;
-    for (const SteelPlateBlock& plate : plates) total += loadOf(plate, stream);
+    for (const SteelPlateBlock& plate : plates) total += loadOf(plate, stream, config);
     return total;
 }
 
@@ -65,30 +266,28 @@ double normalizedError(double actual, double target, double total)
 
 // 用实际工序时间评估给定顺序产生的队列和缓冲区压力
 double queuePressureScore(
-    const QVector<SteelPlateBlock>& plates,
-    const QVector<int>& order,
+    const TimelineSummary& summary,
     const OptimizerConfig& config)
 {
-    if (order.isEmpty()) return 0.0;
-    TimelineSummary summary;
-    TimelineSimulator::simulate(plates, order, config, &summary);
     if (summary.workpieceCount <= 0) return 0.0;
-    double sprayReferenceTime = 0.0;
-    for (int plateIndex : order) {
-        if (plateIndex < 0 || plateIndex >= plates.size()) continue;
-        sprayReferenceTime += config.sprayPlateSeconds(
-            plates[plateIndex].workpieces.size());
-    }
-    const double referenceTime = std::max(1.0, sprayReferenceTime);
-    const double waitRatio = summary.totalQueueWaitSeconds / referenceTime;
+    const double referenceTime = std::max(1.0, summary.finishTime);
     const double blockedRatio = summary.totalBufferBlockedSeconds / referenceTime;
     const double fullEventRatio = static_cast<double>(summary.bufferFullEvents) /
         summary.workpieceCount;
     const double bufferRatio = config.bufferCapacity > 0
         ? static_cast<double>(summary.maximumBufferedWorkpieces) / config.bufferCapacity
         : static_cast<double>(summary.maximumBufferedWorkpieces);
-    return waitRatio + 5.0 * blockedRatio +
-        20.0 * fullEventRatio + 0.25 * bufferRatio;
+    // 只有缓冲区满后无法释放工件的时间计入最高优先级堵塞评分
+    const double blockageTier = summary.bufferFullEvents > 0 ||
+        summary.totalBufferBlockedSeconds > Epsilon
+        ? 1000000.0 + 100.0 * blockedRatio + 20.0 * fullEventRatio : 0.0;
+    return blockageTier + 0.001 * bufferRatio;
+}
+
+// 将指定工序的累计等待时间按当前时序长度归一化
+double stageWaitScore(double waitSeconds, const TimelineSummary& summary)
+{
+    return waitSeconds / std::max(1.0, summary.finishTime);
 }
 
 // 计算相邻两张高负荷钢板造成的拥挤惩罚
@@ -119,6 +318,33 @@ void addPriorityScore(
     score.value = value;
     score.tolerance = tolerance;
     scores->append(score);
+}
+
+// 将人工和机器接焊交替评分放入焊接优先级
+void addWeldRouteScore(
+    QVector<PriorityScore>* scores,
+    double routePenalty,
+    const OptimizerConfig& config)
+{
+    int priority = std::numeric_limits<int>::max();
+    double weight = 0.0;
+    double tolerance = 0.0;
+    int enabledCount = 0;
+    const BalanceObjectiveSetting settings[] = {
+        config.manualWeldObjective, config.robotWeldObjective
+    };
+    for (const BalanceObjectiveSetting& setting : settings) {
+        if (!setting.enabled) continue;
+        priority = priority == std::numeric_limits<int>::max()
+            ? setting.priority : std::max(priority, setting.priority);
+        weight += setting.weight;
+        tolerance = std::max(tolerance, setting.tolerance);
+        ++enabledCount;
+    }
+    if (enabledCount == 0) return;
+    const double averageWeight = weight / enabledCount;
+    addPriorityScore(scores, priority + 2,
+        averageWeight * config.adjacentLoadWeight * routePenalty, tolerance);
 }
 
 // 按照优先级从高到低排列评分层级
@@ -155,11 +381,24 @@ double streamFullScore(
     LoadStream stream,
     const OptimizerConfig& config)
 {
-    const int count = order.size();
-    if (count <= 1) return 0.0;
-    const double total = totalLoad(plates, stream);
+    int fullWorkpieceCount = 0;
+    for (const SteelPlateBlock& plate : plates) {
+        fullWorkpieceCount += plate.workpieces.size();
+    }
+    if (fullWorkpieceCount <= 1) return 0.0;
+    const double total = totalLoad(plates, stream, config);
     if (total <= 0.0) return 0.0;
-    const double average = total / count;
+    const double average = total / fullWorkpieceCount;
+
+    QVector<double> workpieceLoads;
+    for (int plateIndex : order) {
+        if (plateIndex < 0 || plateIndex >= plates.size()) continue;
+        for (const WorkpieceProcessData& item : plates[plateIndex].workpieces) {
+            workpieceLoads.append(workpieceLoadOf(item, stream, config));
+        }
+    }
+    const int count = workpieceLoads.size();
+    if (count <= 1) return 0.0;
 
     double prefix = 0.0;
     double adjacent = 0.0;
@@ -167,18 +406,19 @@ double streamFullScore(
     double cumulative = 0.0;
     const int window = std::max(1, std::min(config.rollingWindow, count));
     for (int position = 0; position < count; ++position) {
-        cumulative += loadOf(plates[order[position]], stream);
-        const double progress = static_cast<double>(position + 1) / count;
+        cumulative += workpieceLoads[position];
+        const double progress = static_cast<double>(position + 1) /
+            fullWorkpieceCount;
         prefix += normalizedError(cumulative, total * progress, total);
         if (position > 0) {
             adjacent += adjacentPenalty(
-                loadOf(plates[order[position - 1]], stream),
-                loadOf(plates[order[position]], stream), average, config.highLoadFactor);
+                workpieceLoads[position - 1], workpieceLoads[position],
+                average, config.highLoadFactor);
         }
         if (position + 1 >= window) {
             double windowLoad = 0.0;
             for (int i = position + 1 - window; i <= position; ++i) {
-                windowLoad += loadOf(plates[order[i]], stream);
+                windowLoad += workpieceLoads[i];
             }
             const double expected = average * window;
             rolling += std::max(0.0, windowLoad - expected) / std::max(1.0, total);
@@ -199,59 +439,39 @@ QVector<PriorityScore> fullScores(
     const OptimizerConfig& config)
 {
     QVector<PriorityScore> result;
-    addPriorityScore(&result, 0,
-        queuePressureScore(plates, order, config), 1e-9);
+    TimelineSummary summary;
+    TimelineSimulator::simulate(plates, order, config, &summary);
+    addPriorityScore(&result, 0, queuePressureScore(summary, config), 1e-9);
+    const int weldPriority = std::min(
+        config.manualWeldObjective.priority, config.robotWeldObjective.priority);
+    addPriorityScore(&result, weldPriority,
+        weldRouteProportionPenalty(plates, order, config), 1e-9);
     for (LoadStream stream : streams()) {
         const BalanceObjectiveSetting& setting = settingOf(config, stream);
         if (!setting.enabled) continue;
-        addPriorityScore(&result, setting.priority,
-            setting.weight * streamFullScore(plates, order, stream, config),
-            setting.tolerance);
-    }
-    sortScores(&result);
-    return result;
-}
-
-// 计算候选钢板放到当前末尾后的增量评分
-QVector<PriorityScore> candidateScores(
-    const QVector<SteelPlateBlock>& plates,
-    const QVector<int>& currentOrder,
-    int candidateIndex,
-    const OptimizerConfig& config)
-{
-    QVector<PriorityScore> result;
-    const int fullCount = plates.size();
-    const int position = currentOrder.size();
-    for (LoadStream stream : streams()) {
-        const BalanceObjectiveSetting& setting = settingOf(config, stream);
-        if (!setting.enabled) continue;
-        const double total = totalLoad(plates, stream);
-        const double average = fullCount > 0 ? total / fullCount : 0.0;
-        double cumulative = 0.0;
-        for (int index : currentOrder) cumulative += loadOf(plates[index], stream);
-        const double candidateLoad = loadOf(plates[candidateIndex], stream);
-        const double progress = static_cast<double>(position + 1) / std::max(1, fullCount);
-        double value = config.prefixBalanceWeight *
-            normalizedError(cumulative + candidateLoad, total * progress, total);
-
-        if (!currentOrder.isEmpty()) {
-            value += config.adjacentLoadWeight * adjacentPenalty(
-                loadOf(plates[currentOrder.last()], stream), candidateLoad,
-                average, config.highLoadFactor);
+        double stageScore = streamFullScore(plates, order, stream, config);
+        if (stream == LoadStream::Bevel) {
+            stageScore += stageWaitScore(summary.bevelQueueWaitSeconds, summary);
+        } else if (stream == LoadStream::ManualWeld) {
+            stageScore += stageWaitScore(
+                summary.manualOuterQueueWaitSeconds +
+                summary.manualInnerQueueWaitSeconds, summary);
+        } else if (stream == LoadStream::RobotWeld) {
+            stageScore += stageWaitScore(
+                summary.robotOuterQueueWaitSeconds +
+                summary.robotInnerQueueWaitSeconds, summary);
         }
-
-        const int window = std::max(1, config.rollingWindow);
-        if (position + 1 >= window && total > 0.0) {
-            double windowLoad = candidateLoad;
-            const int first = std::max(0, position + 1 - window);
-            for (int i = first; i < position; ++i) {
-                windowLoad += loadOf(plates[currentOrder[i]], stream);
-            }
-            value += config.rollingWindowWeight *
-                std::max(0.0, windowLoad - average * window) / std::max(1.0, total);
-        }
-        addPriorityScore(&result, setting.priority, setting.weight * value, setting.tolerance);
+        const int scorePriority = stream == LoadStream::Bevel
+            ? setting.priority : std::max(setting.priority, weldPriority + 1);
+        addPriorityScore(&result, scorePriority,
+            setting.weight * stageScore, setting.tolerance);
     }
+    const double weldTolerance = std::max(
+        config.manualWeldObjective.tolerance, config.robotWeldObjective.tolerance);
+    addPriorityScore(&result, weldPriority + 1,
+        stageWaitScore(summary.tackQueueWaitSeconds, summary), weldTolerance);
+    addWeldRouteScore(&result,
+        weldRouteRunPenalty(plates, order, config), config);
     sortScores(&result);
     return result;
 }
@@ -261,12 +481,13 @@ int longestHighRun(
     const QVector<SteelPlateBlock>& plates,
     const QVector<int>& order,
     double threshold,
-    LoadStream stream)
+    LoadStream stream,
+    const OptimizerConfig& config)
 {
     int longest = 0;
     int current = 0;
     for (int index : order) {
-        if (loadOf(plates[index], stream) > threshold) {
+        if (loadOf(plates[index], stream, config) > threshold) {
             ++current;
             longest = std::max(longest, current);
         } else {
@@ -281,15 +502,16 @@ double rollingPeak(
     const QVector<SteelPlateBlock>& plates,
     const QVector<int>& order,
     int window,
-    LoadStream stream)
+    LoadStream stream,
+    const OptimizerConfig& config)
 {
     if (order.isEmpty()) return 0.0;
     window = std::max(1, std::min(window, order.size()));
     double sum = 0.0;
     double peak = 0.0;
     for (int i = 0; i < order.size(); ++i) {
-        sum += loadOf(plates[order[i]], stream);
-        if (i >= window) sum -= loadOf(plates[order[i - window]], stream);
+        sum += loadOf(plates[order[i]], stream, config);
+        if (i >= window) sum -= loadOf(plates[order[i - window]], stream, config);
         if (i + 1 >= window) peak = std::max(peak, sum);
     }
     return peak;
@@ -336,8 +558,10 @@ QVector<int> optimizePlateSequence(
              candidatePosition < remaining.size(); ++candidatePosition) {
             RankedCandidate candidate;
             candidate.remainingPosition = candidatePosition;
-            candidate.scores = candidateScores(
-                plates, order, remaining[candidatePosition], config);
+            QVector<int> trialOrder = order;
+            trialOrder.append(remaining[candidatePosition]);
+            // 每张候选钢板都把内部工件逐个接入完整时序后再比较各工序压力
+            candidate.scores = fullScores(plates, trialOrder, config);
             ranked.append(candidate);
         }
         std::sort(ranked.begin(), ranked.end(), [&](
@@ -347,33 +571,7 @@ QVector<int> optimizePlateSequence(
             return plates[remaining[left.remainingPosition]].originalIndex <
                 plates[remaining[right.remainingPosition]].originalIndex;
         });
-
-        // 先按负荷筛选候选钢板，再用实际时序和缓冲区压力选择最终位置
-        const int shortlistSize = std::min(12, ranked.size());
         int bestRemaining = ranked.first().remainingPosition;
-        QVector<PriorityScore> best = ranked.first().scores;
-        QVector<int> trialOrder = order;
-        trialOrder.append(remaining[bestRemaining]);
-        addPriorityScore(&best, 0,
-            queuePressureScore(plates, trialOrder, config), 1e-9);
-        sortScores(&best);
-        for (int candidateIndex = 1; candidateIndex < shortlistSize; ++candidateIndex) {
-            const int remainingPosition = ranked[candidateIndex].remainingPosition;
-            QVector<PriorityScore> candidate = ranked[candidateIndex].scores;
-            trialOrder = order;
-            trialOrder.append(remaining[remainingPosition]);
-            addPriorityScore(&candidate, 0,
-                queuePressureScore(plates, trialOrder, config), 1e-9);
-            sortScores(&candidate);
-            const int comparison = compareScores(candidate, best);
-            if (comparison < 0 ||
-                (comparison == 0 &&
-                 plates[remaining[remainingPosition]].originalIndex <
-                    plates[remaining[bestRemaining]].originalIndex)) {
-                bestRemaining = remainingPosition;
-                best = candidate;
-            }
-        }
         order.append(remaining.takeAt(bestRemaining));
     }
 
@@ -398,7 +596,9 @@ QVector<int> optimizePlateSequence(
         }
     }
 
-    if (compareScores(currentScore, fullScores(plates, original, config)) > 0) return original;
+    if (compareScores(currentScore, fullScores(plates, original, config)) > 0) {
+        return original;
+    }
     return order;
 }
 }
@@ -422,22 +622,22 @@ BalanceMetrics SequenceOptimizer::calculateMetrics(
     if (count == 0) return metrics;
 
     for (int index : order) {
-        metrics.totalBevel += plates[index].bevelCount;
-        metrics.totalManualWeld += plates[index].manualWeldCount;
-        metrics.totalRobotWeld += plates[index].robotWeldCount;
+        metrics.totalBevel += loadOf(plates[index], LoadStream::Bevel, config);
+        metrics.totalManualWeld += loadOf(plates[index], LoadStream::ManualWeld, config);
+        metrics.totalRobotWeld += loadOf(plates[index], LoadStream::RobotWeld, config);
         metrics.totalUnclassifiedWeld += plates[index].unclassifiedWeldCount;
     }
     const int frontCount = count / 2;
     for (int position = 0; position < count; ++position) {
         const SteelPlateBlock& plate = plates[order[position]];
         if (position < frontCount) {
-            metrics.frontBevel += plate.bevelCount;
-            metrics.frontManualWeld += plate.manualWeldCount;
-            metrics.frontRobotWeld += plate.robotWeldCount;
+            metrics.frontBevel += loadOf(plate, LoadStream::Bevel, config);
+            metrics.frontManualWeld += loadOf(plate, LoadStream::ManualWeld, config);
+            metrics.frontRobotWeld += loadOf(plate, LoadStream::RobotWeld, config);
         } else {
-            metrics.backBevel += plate.bevelCount;
-            metrics.backManualWeld += plate.manualWeldCount;
-            metrics.backRobotWeld += plate.robotWeldCount;
+            metrics.backBevel += loadOf(plate, LoadStream::Bevel, config);
+            metrics.backManualWeld += loadOf(plate, LoadStream::ManualWeld, config);
+            metrics.backRobotWeld += loadOf(plate, LoadStream::RobotWeld, config);
         }
     }
 
@@ -450,28 +650,31 @@ BalanceMetrics SequenceOptimizer::calculateMetrics(
     for (int position = 1; position < count; ++position) {
         const SteelPlateBlock& previous = plates[order[position - 1]];
         const SteelPlateBlock& current = plates[order[position]];
-        if (previous.bevelCount > bevelThreshold && current.bevelCount > bevelThreshold) {
+        if (loadOf(previous, LoadStream::Bevel, config) > bevelThreshold &&
+            loadOf(current, LoadStream::Bevel, config) > bevelThreshold) {
             ++metrics.adjacentHighBevelPairs;
         }
-        if (previous.manualWeldCount > manualThreshold && current.manualWeldCount > manualThreshold) {
+        if (loadOf(previous, LoadStream::ManualWeld, config) > manualThreshold &&
+            loadOf(current, LoadStream::ManualWeld, config) > manualThreshold) {
             ++metrics.adjacentHighManualWeldPairs;
         }
-        if (previous.robotWeldCount > robotThreshold && current.robotWeldCount > robotThreshold) {
+        if (loadOf(previous, LoadStream::RobotWeld, config) > robotThreshold &&
+            loadOf(current, LoadStream::RobotWeld, config) > robotThreshold) {
             ++metrics.adjacentHighRobotWeldPairs;
         }
     }
     metrics.longestHighBevelRun = longestHighRun(
-        plates, order, bevelThreshold, LoadStream::Bevel);
+        plates, order, bevelThreshold, LoadStream::Bevel, config);
     metrics.longestHighManualWeldRun = longestHighRun(
-        plates, order, manualThreshold, LoadStream::ManualWeld);
+        plates, order, manualThreshold, LoadStream::ManualWeld, config);
     metrics.longestHighRobotWeldRun = longestHighRun(
-        plates, order, robotThreshold, LoadStream::RobotWeld);
+        plates, order, robotThreshold, LoadStream::RobotWeld, config);
     metrics.rollingPeakBevel = rollingPeak(
-        plates, order, config.rollingWindow, LoadStream::Bevel);
+        plates, order, config.rollingWindow, LoadStream::Bevel, config);
     metrics.rollingPeakManualWeld = rollingPeak(
-        plates, order, config.rollingWindow, LoadStream::ManualWeld);
+        plates, order, config.rollingWindow, LoadStream::ManualWeld, config);
     metrics.rollingPeakRobotWeld = rollingPeak(
-        plates, order, config.rollingWindow, LoadStream::RobotWeld);
+        plates, order, config.rollingWindow, LoadStream::RobotWeld, config);
     metrics.objective = calculateScore(plates, order, config);
     return metrics;
 }

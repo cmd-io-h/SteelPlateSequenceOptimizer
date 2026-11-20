@@ -74,6 +74,37 @@ QString timeText(double seconds)
         .arg(remainingSeconds, 2, 10, QLatin1Char('0'));
 }
 
+// 将界面显示文本还原为适合Excel计算的数值类型
+QVariant exportCellValue(const QString& header, const QString& displayText)
+{
+    const QString text = displayText.trimmed();
+    if (text.isEmpty()) return QVariant();
+
+    static const QRegularExpression clockExpression(
+        QStringLiteral("^(\\d+):(\\d{2}):(\\d{2})$"));
+    const QRegularExpressionMatch clockMatch = clockExpression.match(text);
+    if (clockMatch.hasMatch() && header != QStringLiteral("需求日期")) {
+        const double seconds = clockMatch.captured(1).toDouble() * 3600.0 +
+            clockMatch.captured(2).toDouble() * 60.0 + clockMatch.captured(3).toDouble();
+        return seconds / 86400.0;
+    }
+
+    if (text.endsWith(QLatin1Char('%'))) {
+        bool ok = false;
+        const double percent = text.left(text.size() - 1).toDouble(&ok);
+        if (ok) return percent / 100.0;
+    }
+
+    static const QRegularExpression numberExpression(
+        QStringLiteral("^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)$"));
+    if (numberExpression.match(text).hasMatch()) {
+        bool ok = false;
+        const double value = text.toDouble(&ok);
+        if (ok) return value;
+    }
+    return text;
+}
+
 // 返回甲方确认的钢板明细和各工序时序列
 QStringList timelineTableHeaders()
 {
@@ -84,15 +115,17 @@ QStringList timelineTableHeaders()
         QStringLiteral("分段名"), QStringLiteral("管名"), QStringLiteral("需求日期"),
         QStringLiteral("规格"), QStringLiteral("材质"), QStringLiteral("加工系列"),
         QStringLiteral("区域"), QStringLiteral("长度"), QStringLiteral("坡口"),
-        QStringLiteral("线上装配信息(简写)"), QStringLiteral("搭焊"),
+        QStringLiteral("线上装配信息(简写)"),
         QStringLiteral("喷码进入时间"), QStringLiteral("喷码完成时间"), QStringLiteral("喷码用时"),
         QStringLiteral("堵塞用时"), QStringLiteral("进入切割时间"), QStringLiteral("完成切割时间"),
         QStringLiteral("切割时间"), QStringLiteral("堵塞用时"), QStringLiteral("进入坡口时间"),
         QStringLiteral("完成坡口时间"), QStringLiteral("坡口用时"), QStringLiteral("堵塞时间"),
-        QStringLiteral("进入人工组对时间"), QStringLiteral("完成人工组对时间"),
-        QStringLiteral("组对用时"), QStringLiteral("堵塞用时"), QStringLiteral("接焊方式"),
-        QStringLiteral("接焊工位"), QStringLiteral("进入接焊时间"), QStringLiteral("完成接焊时间"),
-        QStringLiteral("接焊用时"), QStringLiteral("堵塞用时"), QStringLiteral("进入分拣时间"),
+        QStringLiteral("进入人工组队时间"), QStringLiteral("完成人工组队时间"),
+        QStringLiteral("组队用时"), QStringLiteral("堵塞用时"), QStringLiteral("接焊方式"),
+        QStringLiteral("进入外圈接焊时间"), QStringLiteral("完成外圈接焊时间"),
+        QStringLiteral("外圈接焊用时"), QStringLiteral("中间缓冲区堵塞用时"),
+        QStringLiteral("进入内圈接焊时间"), QStringLiteral("完成内圈接焊时间"),
+        QStringLiteral("内圈接焊用时"), QStringLiteral("进入分拣时间"),
         QStringLiteral("完成分拣时间")
     };
 }
@@ -114,7 +147,8 @@ WorkbookSheetData resultSheetData(const QString& name, const QTableWidget* table
         values.reserve(table->columnCount());
         for (int column = 0; column < table->columnCount(); ++column) {
             const QTableWidgetItem* item = table->item(row, column);
-            values.append(item ? QVariant(item->text()) : QVariant());
+            values.append(item
+                ? exportCellValue(result.headers[column], item->text()) : QVariant());
         }
         result.rows.append(values);
     }
@@ -321,7 +355,7 @@ void MainWindow::buildUi()
     fileLayout->setColumnStretch(4, 1);
 
     QGroupBox* diameterSelectionGroup = new QGroupBox(
-        QStringLiteral("参与排产的管径"), central);
+        QStringLiteral("管径分类"), central);
     QHBoxLayout* diameterSelectionLayout = new QHBoxLayout(diameterSelectionGroup);
     smallDiameterCheck_ = new QCheckBox(QStringLiteral("小径"), diameterSelectionGroup);
     mediumDiameterCheck_ = new QCheckBox(QStringLiteral("中径"), diameterSelectionGroup);
@@ -329,8 +363,10 @@ void MainWindow::buildUi()
     smallDiameterCheck_->setChecked(true);
     mediumDiameterCheck_->setChecked(false);
     largeDiameterCheck_->setChecked(false);
-    diameterSelectionLayout->addWidget(new QLabel(
-        QStringLiteral("勾选后进入当前排产和时序图："), diameterSelectionGroup));
+    smallDiameterCheck_->setEnabled(false);
+    mediumDiameterCheck_->setEnabled(false);
+    largeDiameterCheck_->setEnabled(false);
+
     diameterSelectionLayout->addWidget(smallDiameterCheck_);
     diameterSelectionLayout->addWidget(mediumDiameterCheck_);
     diameterSelectionLayout->addWidget(largeDiameterCheck_);
@@ -377,7 +413,7 @@ void MainWindow::buildUi()
     scheduleTable_ = new QTableWidget(resultTabs_);
     scheduleTable_->setColumnCount(9);
     scheduleTable_->setHorizontalHeaderLabels({
-        QStringLiteral("钢板明细"), QStringLiteral("材质"), QStringLiteral("规格(厚×宽)"),
+        QStringLiteral("钢板明细"), QStringLiteral("材质"), QStringLiteral("规格(宽X厚)"),
         QStringLiteral("钢板编号"), QStringLiteral("工件数"), QStringLiteral("已用长度(mm)"),
         QStringLiteral("余料(mm)"), QStringLiteral("利用率"), QStringLiteral("工件名称")
     });
@@ -411,17 +447,6 @@ void MainWindow::buildUi()
         warehouseWidthFilter_->setCurrentIndex(0);
         applyWarehouseFilters();
     });
-    const auto refreshActiveSchedule = [this]() {
-        if (sourceWorkbookData_.inputPath.isEmpty()) {
-            populatePreview();
-            return;
-        }
-        analyzeAndOptimize();
-    };
-    connect(smallDiameterCheck_, &QCheckBox::toggled, this, refreshActiveSchedule);
-    connect(mediumDiameterCheck_, &QCheckBox::toggled, this, refreshActiveSchedule);
-    connect(largeDiameterCheck_, &QCheckBox::toggled, this, refreshActiveSchedule);
-
     logEdit_ = new QPlainTextEdit(central);
     logEdit_->setReadOnly(true);
     logEdit_->setMaximumBlockCount(2000);
@@ -504,7 +529,7 @@ void MainWindow::buildParameterDialog()
     routingLayout->addWidget(new QLabel(QStringLiteral("大径机器接焊宽度范围"), routingGroup), 2, 0);
     routingLayout->addWidget(largeWidthsEdit_, 2, 1, 1, 3);
     QLabel* routingHint = new QLabel(
-        QStringLiteral("中径和大径当前计入机器接焊负荷，时序节拍沿用机器接焊参数。"),
+        QStringLiteral("保留小径、中径和大径的范围区分，当前计算仍只处理小径，中径和大径在套料前过滤"),
         routingGroup);
     routingHint->setStyleSheet(QStringLiteral("color:#666666;"));
     routingLayout->addWidget(routingHint, 3, 0, 1, 4);
@@ -561,17 +586,13 @@ void MainWindow::buildParameterDialog()
     bevelStationCountSpin_->setRange(1, 20);
     bevelCycleSpin_ = createDoubleSpin(flowTimingGroup, 0.0, 100000.0, 2, 1.0);
     tackCycleSpin_ = createDoubleSpin(flowTimingGroup, 0.0, 100000.0, 2, 1.0);
-    manualWeldStationCountSpin_ = new QSpinBox(flowTimingGroup);
-    manualWeldStationCountSpin_->setRange(1, 20);
     manualWeldCycleSpin_ = createDoubleSpin(flowTimingGroup, 0.0, 100000.0, 2, 1.0);
-    robotWeldStationCountSpin_ = new QSpinBox(flowTimingGroup);
-    robotWeldStationCountSpin_->setRange(1, 20);
     robotWeldFixedSpin_ = createDoubleSpin(flowTimingGroup, 0.0, 100000.0, 2, 1.0);
     robotWeldSpeedSpin_ = createDoubleSpin(flowTimingGroup, 0.01, 10000.0, 2, 0.1);
 
     flowTimingLayout->addWidget(new QLabel(QStringLiteral("进入后续最小长度(mm)"), flowTimingGroup), 0, 0);
     flowTimingLayout->addWidget(downstreamMinimumLengthSpin_, 0, 1);
-    flowTimingLayout->addWidget(new QLabel(QStringLiteral("各工序缓冲位"), flowTimingGroup), 0, 2);
+    flowTimingLayout->addWidget(new QLabel(QStringLiteral("外圈与内圈中间缓冲位"), flowTimingGroup), 0, 2);
     flowTimingLayout->addWidget(bufferCapacitySpin_, 0, 3);
     flowTimingLayout->addWidget(new QLabel(QStringLiteral("喷码单件增量(s)"), flowTimingGroup), 1, 0);
     flowTimingLayout->addWidget(sprayIncrementSpin_, 1, 1);
@@ -579,18 +600,19 @@ void MainWindow::buildParameterDialog()
     flowTimingLayout->addWidget(bevelStationCountSpin_, 1, 3);
     flowTimingLayout->addWidget(new QLabel(QStringLiteral("坡口节拍(s)"), flowTimingGroup), 2, 0);
     flowTimingLayout->addWidget(bevelCycleSpin_, 2, 1);
-    flowTimingLayout->addWidget(new QLabel(QStringLiteral("人工搭焊(s)"), flowTimingGroup), 2, 2);
+    flowTimingLayout->addWidget(new QLabel(QStringLiteral("人工组队(s)"), flowTimingGroup), 2, 2);
     flowTimingLayout->addWidget(tackCycleSpin_, 2, 3);
-    flowTimingLayout->addWidget(new QLabel(QStringLiteral("人工接焊工位数"), flowTimingGroup), 3, 0);
-    flowTimingLayout->addWidget(manualWeldStationCountSpin_, 3, 1);
-    flowTimingLayout->addWidget(new QLabel(QStringLiteral("人工接焊节拍(s)"), flowTimingGroup), 3, 2);
-    flowTimingLayout->addWidget(manualWeldCycleSpin_, 3, 3);
-    flowTimingLayout->addWidget(new QLabel(QStringLiteral("机器接焊工位数"), flowTimingGroup), 4, 0);
-    flowTimingLayout->addWidget(robotWeldStationCountSpin_, 4, 1);
-    flowTimingLayout->addWidget(new QLabel(QStringLiteral("机器接焊固定动作(s)"), flowTimingGroup), 4, 2);
-    flowTimingLayout->addWidget(robotWeldFixedSpin_, 4, 3);
-    flowTimingLayout->addWidget(new QLabel(QStringLiteral("机器接焊速度(mm/s)"), flowTimingGroup), 5, 0);
-    flowTimingLayout->addWidget(robotWeldSpeedSpin_, 5, 1);
+    flowTimingLayout->addWidget(new QLabel(QStringLiteral("人工单道接焊节拍(s)"), flowTimingGroup), 3, 0);
+    flowTimingLayout->addWidget(manualWeldCycleSpin_, 3, 1);
+    flowTimingLayout->addWidget(new QLabel(QStringLiteral("机器单道固定动作(s)"), flowTimingGroup), 3, 2);
+    flowTimingLayout->addWidget(robotWeldFixedSpin_, 3, 3);
+    flowTimingLayout->addWidget(new QLabel(QStringLiteral("机器单道焊接速度(mm/s)"), flowTimingGroup), 4, 0);
+    flowTimingLayout->addWidget(robotWeldSpeedSpin_, 4, 1);
+    QLabel* weldTimingHint = new QLabel(
+        QStringLiteral("人工和机器接焊均先加工外圈，再经中间缓冲区加工内圈，两道分别计算完整节拍"),
+        flowTimingGroup);
+    weldTimingHint->setStyleSheet(QStringLiteral("color:#666666;"));
+    flowTimingLayout->addWidget(weldTimingHint, 5, 0, 1, 4);
 
     QGroupBox* sawTimingGroup = new QGroupBox(QStringLiteral("圆锯切割节拍"), timingTab);
     QGridLayout* sawTimingLayout = new QGridLayout(sawTimingGroup);
@@ -743,26 +765,10 @@ bool MainWindow::analyzeAndOptimize()
         QMessageBox::warning(this, QStringLiteral("参数错误"), error);
         return false;
     }
-    if (!smallDiameterCheck_->isChecked() &&
-        !mediumDiameterCheck_->isChecked() &&
-        !largeDiameterCheck_->isChecked()) {
-        sourceWorkbookData_ = WorkbookData();
-        sourceWorkbookData_.inputPath = QFileInfo(inputPath).absoluteFilePath();
-        workbookData_ = WorkbookData();
-        optimizedOrder_.clear();
-        calculationSummaryBase_ = QStringLiteral("请至少勾选一种参与排产的管径");
-        summaryLabel_->setText(calculationSummaryBase_);
-        exportButton_->setEnabled(false);
-        populatePreview();
-        return false;
-    }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     WorkbookData loadedData;
     const bool loaded = WorkbookService::load(
-        inputPath, config_,
-        smallDiameterCheck_->isChecked(),
-        mediumDiameterCheck_->isChecked(),
-        largeDiameterCheck_->isChecked(),
+        inputPath, config_, true, false, false,
         &loadedData, &error);
     QApplication::restoreOverrideCursor();
     if (!loaded) {
@@ -795,9 +801,9 @@ void MainWindow::rebuildActiveSchedule()
     workbookData_.plates.clear();
     workbookData_.validWorkpieceCount = 0;
 
-    // 未勾选管径在优化前剔除，不进入立库、排产、时序图和导出
+    // 只保留小径钢板，中径和大径不进入套料、排产、时序图和导出
     for (const SteelPlateBlock& sourcePlate : sourceWorkbookData_.plates) {
-        if (!isDiameterSelected(sourcePlate.width)) continue;
+        if (!isSmallDiameter(sourcePlate.width)) continue;
         workbookData_.plates.append(sourcePlate);
         workbookData_.validWorkpieceCount += sourcePlate.workpieceCount;
     }
@@ -820,14 +826,13 @@ void MainWindow::rebuildActiveSchedule()
         ? QStringLiteral("原始工件已完成分组和一维套料。")
         : QStringLiteral("已识别现有钢板明细，只调整整张钢板顺序。"));
     logEdit_->appendPlainText(QStringLiteral(
-        "有效工件 %1 个，跳过 %2 行；钢板 %3 张；坡口 %4，人工焊 %5，机器焊 %6，未分类焊 %7。")
+        "有效工件 %1 个，跳过 %2 行，钢板 %3 张，坡口负荷 %4 秒，人工路线负荷 %5 秒，机器路线负荷 %6 秒")
         .arg(workbookData_.validWorkpieceCount)
         .arg(workbookData_.skippedWorkpieceCount)
         .arg(workbookData_.plates.size())
         .arg(numberText(after.totalBevel))
         .arg(numberText(after.totalManualWeld))
-        .arg(numberText(after.totalRobotWeld))
-        .arg(numberText(after.totalUnclassifiedWeld)));
+        .arg(numberText(after.totalRobotWeld)));
     appendMetrics(QStringLiteral("调整前"), before, workbookData_.plates.size());
     appendMetrics(QStringLiteral("调整后"), after, workbookData_.plates.size());
     for (int index = 0; index < std::min(10, workbookData_.warnings.size()); ++index) {
@@ -914,9 +919,7 @@ void MainWindow::applyConfigToUi(const OptimizerConfig& config)
     bevelStationCountSpin_->setValue(config.bevelStationCount);
     bevelCycleSpin_->setValue(config.bevelCycleSeconds);
     tackCycleSpin_->setValue(config.tackCycleSeconds);
-    manualWeldStationCountSpin_->setValue(config.manualWeldStationCount);
     manualWeldCycleSpin_->setValue(config.manualWeldCycleSeconds);
-    robotWeldStationCountSpin_->setValue(config.robotWeldStationCount);
     robotWeldFixedSpin_->setValue(config.robotWeldFixedSeconds);
     robotWeldSpeedSpin_->setValue(config.robotWeldSpeedMmPerSecond);
     updateParameterSummary();
@@ -959,9 +962,7 @@ OptimizerConfig MainWindow::configFromUi() const
     result.bevelStationCount = bevelStationCountSpin_->value();
     result.bevelCycleSeconds = bevelCycleSpin_->value();
     result.tackCycleSeconds = tackCycleSpin_->value();
-    result.manualWeldStationCount = manualWeldStationCountSpin_->value();
     result.manualWeldCycleSeconds = manualWeldCycleSpin_->value();
-    result.robotWeldStationCount = robotWeldStationCountSpin_->value();
     result.robotWeldFixedSeconds = robotWeldFixedSpin_->value();
     result.robotWeldSpeedMmPerSecond = robotWeldSpeedSpin_->value();
     return result;
@@ -1104,7 +1105,7 @@ void MainWindow::populateScheduleTable()
 {
     scheduleTable_->clearContents();
     QStringList headers = {
-        QStringLiteral("钢板明细"), QStringLiteral("材质"), QStringLiteral("规格(厚×宽)"),
+        QStringLiteral("钢板明细"), QStringLiteral("材质"), QStringLiteral("规格(宽X厚)"),
         QStringLiteral("钢板编号"), QStringLiteral("工件数"), QStringLiteral("已用长度(mm)"),
         QStringLiteral("余料(mm)"), QStringLiteral("利用率"), QStringLiteral("工件名称")
     };
@@ -1145,7 +1146,7 @@ void MainWindow::populateScheduleTable()
         // 非标准明细仍保留原表字段，只合并搭焊和套管
         const QStringList mergedHeaders = {
             QStringLiteral("钢板明细"), QStringLiteral("钢板组"),
-            QStringLiteral("材质"), QStringLiteral("规格"), QStringLiteral("规格(厚×宽)"),
+            QStringLiteral("材质"), QStringLiteral("规格"), QStringLiteral("规格(宽X厚)"),
             QStringLiteral("宽度"), QStringLiteral("宽度(mm)"),
             QStringLiteral("厚度"), QStringLiteral("厚度(mm)"),
             QStringLiteral("钢板编号"), QStringLiteral("钢板长度"), QStringLiteral("钢板长度(mm)"),
@@ -1266,11 +1267,8 @@ void MainWindow::populateTimelineTable()
     if (entries.isEmpty()) {
         timelineTable_->setRowCount(1);
         timelineTable_->setSpan(0, 0, 1, timelineTable_->columnCount());
-        const bool anyDiameterSelected = smallDiameterCheck_->isChecked() ||
-            mediumDiameterCheck_->isChecked() || largeDiameterCheck_->isChecked();
-        QTableWidgetItem* item = new QTableWidgetItem(anyDiameterSelected
-            ? QStringLiteral("当前勾选的管径没有可排产工件。")
-            : QStringLiteral("请至少勾选一种参与排产的管径。"));
+        QTableWidgetItem* item = new QTableWidgetItem(
+            QStringLiteral("当前文件中没有可排产的小径工件。"));
         item->setTextAlignment(Qt::AlignCenter);
         item->setForeground(QColor(QStringLiteral("#666666")));
         timelineTable_->setItem(0, 0, item);
@@ -1324,44 +1322,41 @@ void MainWindow::populateTimelineTable()
         values[18] = sourceValueText(
             workbookData_, workpiece, {QStringLiteral("线上装配信息(简写)"),
                                       QStringLiteral("线上装配信息（简写）")});
-        values[19] = sourceValueText(workbookData_, workpiece, {QStringLiteral("搭焊")});
-        if (values[19].isEmpty() && workpiece.lapWeldCount > 0.0) {
-            values[19] = numberText(workpiece.lapWeldCount);
-        }
 
-        values[20] = timeText(entry.sprayArrival);
-        values[21] = timeText(entry.sprayFinish);
-        values[22] = numberText(entry.sprayDuration);
-        values[23] = numberText(entry.sprayBlockedSeconds);
-        values[24] = timeText(entry.cuttingArrival);
-        values[25] = timeText(entry.cuttingFinish);
-        values[26] = numberText(entry.cuttingDuration);
-        values[27] = numberText(entry.cuttingBlockedSeconds);
-        values[28] = timeText(entry.bevelArrival);
-        values[29] = timeText(entry.bevelFinish);
-        if (entry.bevelFinish >= 0.0) values[30] = numberText(entry.bevelDuration);
-        values[31] = numberText(entry.bevelBlockedSeconds);
-        values[32] = timeText(entry.tackArrival);
-        values[33] = timeText(entry.tackFinish);
-        if (entry.tackFinish >= 0.0) values[34] = numberText(entry.tackDuration);
-        values[35] = numberText(entry.tackBlockedSeconds);
+        values[19] = timeText(entry.sprayArrival);
+        values[20] = timeText(entry.sprayFinish);
+        values[21] = numberText(entry.sprayDuration);
+        values[22] = numberText(entry.sprayBlockedSeconds);
+        values[23] = timeText(entry.cuttingArrival);
+        values[24] = timeText(entry.cuttingFinish);
+        values[25] = numberText(entry.cuttingDuration);
+        values[26] = numberText(entry.cuttingBlockedSeconds);
+        values[27] = timeText(entry.bevelArrival);
+        values[28] = timeText(entry.bevelFinish);
+        if (entry.bevelFinish >= 0.0) values[29] = numberText(entry.bevelDuration);
+        values[30] = numberText(entry.bevelBlockedSeconds);
+        values[31] = timeText(entry.tackArrival);
+        values[32] = timeText(entry.tackFinish);
+        if (entry.tackFinish >= 0.0) values[33] = numberText(entry.tackDuration);
+        values[34] = numberText(entry.tackBlockedSeconds);
 
-        // 人工接焊和机器接焊共用一组时间列并标记实际工位
-        if (entry.weldFinish >= 0.0) {
-            values[36] = entry.weldRoute.contains(QStringLiteral("机器"))
+        // 人工和机器路线分别记录外圈、缓冲区和内圈三段时间
+        if (entry.innerWeldFinish >= 0.0) {
+            values[35] = entry.weldRoute.contains(QStringLiteral("机器"))
                 ? QStringLiteral("机器接焊") : QStringLiteral("人工接焊");
-            if (entry.station.endsWith(QLatin1Char('1'))) values[37] = QStringLiteral("1");
-            if (entry.station.endsWith(QLatin1Char('2'))) values[37] = QStringLiteral("2");
-            values[38] = timeText(entry.weldArrival);
-            values[39] = timeText(entry.weldFinish);
-            values[40] = numberText(entry.weldDuration);
+            values[36] = timeText(entry.outerWeldArrival);
+            values[37] = timeText(entry.outerWeldFinish);
+            values[38] = numberText(entry.outerWeldDuration);
+            values[39] = numberText(entry.weldBlockedSeconds);
+            values[40] = timeText(entry.innerWeldArrival);
+            values[41] = timeText(entry.innerWeldFinish);
+            values[42] = numberText(entry.innerWeldDuration);
         }
-        values[41] = numberText(entry.weldBlockedSeconds);
-        values[42] = timeText(entry.sortingArrival);
-        values[43] = timeText(entry.sortingFinish);
+        values[43] = timeText(entry.sortingArrival);
+        values[44] = timeText(entry.sortingFinish);
         for (int column = 0; column < values.size(); ++column) {
             QTableWidgetItem* item = new QTableWidgetItem(values[column]);
-            item->setTextAlignment(column <= 19
+            item->setTextAlignment(column <= 18
                 ? Qt::AlignLeft | Qt::AlignVCenter : Qt::AlignCenter);
             timelineTable_->setItem(row, column, item);
         }
@@ -1384,12 +1379,10 @@ void MainWindow::populateTimelineTable()
             .arg(numberText(timelineSummary.totalBufferBlockedSeconds)));
 }
 
-// 按照小于76、中径76至114和大于114判断钢板是否参与当前排产
-bool MainWindow::isDiameterSelected(double width) const
+// 判断工件是否属于当前支持的小径范围
+bool MainWindow::isSmallDiameter(double width) const
 {
-    if (width < 76.0) return smallDiameterCheck_->isChecked();
-    if (width <= 114.0) return mediumDiameterCheck_->isChecked();
-    return largeDiameterCheck_->isChecked();
+    return width > 0.0 && width < 76.0;
 }
 
 // 更新主界面顶部的关键参数摘要
@@ -1417,7 +1410,7 @@ void MainWindow::appendMetrics(
     logEdit_->appendPlainText(QStringLiteral(
         "%1：前半段(%2张) 坡口%3/人工焊%4/机器焊%5，后半段(%6张) 坡口%7/人工焊%8/机器焊%9；"
         "相邻高负荷 %10/%11/%12 对；最长连续高负荷 %13/%14/%15 张；"
-        "连续%16张峰值 %17/%18/%19；目标值 %20。")
+        "连续%16张峰值 %17/%18/%19")
         .arg(title).arg(frontCount)
         .arg(numberText(metrics.frontBevel))
         .arg(numberText(metrics.frontManualWeld))
@@ -1435,8 +1428,7 @@ void MainWindow::appendMetrics(
         .arg(config_.rollingWindow)
         .arg(numberText(metrics.rollingPeakBevel))
         .arg(numberText(metrics.rollingPeakManualWeld))
-        .arg(numberText(metrics.rollingPeakRobotWeld))
-        .arg(metrics.objective, 0, 'f', 4));
+        .arg(numberText(metrics.rollingPeakRobotWeld)));
 }
 
 // 在程序目录和开发目录中查找默认参数文件
