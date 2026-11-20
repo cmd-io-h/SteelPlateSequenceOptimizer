@@ -1,3 +1,9 @@
+/**
+ * @file OptimizerConfig.cpp
+ * @brief 读取、校验和保存套料排产参数
+ * @author cmd-io-h
+ */
+
 #include "OptimizerConfig.h"
 
 #include <QFile>

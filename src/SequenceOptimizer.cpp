@@ -1,3 +1,9 @@
+/**
+ * @file SequenceOptimizer.cpp
+ * @brief 按工序负荷、等待和缓冲压力优化整张钢板顺序
+ * @author cmd-io-h
+ */
+
 #include "SequenceOptimizer.h"
 #include "TimelineSimulator.h"
 

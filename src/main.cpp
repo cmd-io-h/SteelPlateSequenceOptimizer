@@ -1,3 +1,9 @@
+/**
+ * @file main.cpp
+ * @brief 启动图形界面或命令行排产流程
+ * @author cmd-io-h
+ */
+
 #include "MainWindow.h"
 #include "OptimizerConfig.h"
 #include "SequenceOptimizer.h"

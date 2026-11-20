@@ -1,3 +1,9 @@
+/**
+ * @file TimelineSimulator.cpp
+ * @brief 模拟喷码、切割、坡口、组队和内外圈接焊时序
+ * @author cmd-io-h
+ */
+
 #include "TimelineSimulator.h"
 
 #include <algorithm>

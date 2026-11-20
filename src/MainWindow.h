@@ -1,3 +1,9 @@
+/**
+ * @file MainWindow.h
+ * @brief 声明钢板套料与流水线均衡工具主窗口
+ * @author cmd-io-h
+ */
+
 #pragma once
 
 #include "OptimizerConfig.h"

@@ -1,3 +1,9 @@
+/**
+ * @file WorkbookService.cpp
+ * @brief 读取原始 Excel、生成钢板数据并导出三张结果表
+ * @author cmd-io-h
+ */
+
 #include "WorkbookService.h"
 
 #include "xlsxcell.h"

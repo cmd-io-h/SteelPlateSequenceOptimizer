@@ -1,3 +1,9 @@
+/**
+ * @file OptimizerConfig.h
+ * @brief 声明套料、均衡、焊接路线和时序参数
+ * @author cmd-io-h
+ */
+
 #pragma once
 
 #include <QString>

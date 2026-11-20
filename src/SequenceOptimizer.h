@@ -1,3 +1,9 @@
+/**
+ * @file SequenceOptimizer.h
+ * @brief 声明钢板顺序优化和均衡指标计算接口
+ * @author cmd-io-h
+ */
+
 #pragma once
 
 #include "OptimizerConfig.h"

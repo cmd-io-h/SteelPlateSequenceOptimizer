@@ -1,3 +1,9 @@
+/**
+ * @file TimelineSimulator.h
+ * @brief 声明工件时序记录、汇总指标和流水线模拟接口
+ * @author cmd-io-h
+ */
+
 #pragma once
 
 #include "OptimizerConfig.h"

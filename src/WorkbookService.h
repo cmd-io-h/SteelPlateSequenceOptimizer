@@ -1,3 +1,9 @@
+/**
+ * @file WorkbookService.h
+ * @brief 声明 Excel 导入、套料数据转换和结果导出接口
+ * @author cmd-io-h
+ */
+
 #pragma once
 
 #include "OptimizerConfig.h"

@@ -1,3 +1,9 @@
+/**
+ * @file MainWindow.cpp
+ * @brief 构建主界面并协调参数配置、排产计算和结果导出
+ * @author cmd-io-h
+ */
+
 #include "MainWindow.h"
 
 #include "SequenceOptimizer.h"
@@ -503,10 +509,9 @@ void MainWindow::buildParameterDialog()
     groupingLayout->addWidget(kerfSpin_, 2, 3);
     groupingLayout->addWidget(new QLabel(QStringLiteral("首尾余量合计(mm)"), groupingGroup), 3, 0);
     groupingLayout->addWidget(endAllowanceSpin_, 3, 1);
-    groupingLayout->addWidget(new QLabel(QStringLiteral("套料长度分界值(mm)"), groupingGroup), 3, 2);
+    groupingLayout->addWidget(new QLabel(QStringLiteral("套料长度分界值(mm)"), groupingGroup), 3, 2);//eg:填入600，就是把大于600的长度尽量均分
     groupingLayout->addWidget(lengthThresholdsEdit_, 3, 3);
-    QLabel* stockLengthHint = new QLabel(
-        QStringLiteral("同一次计算中的所有钢板统一使用上面的钢板长度。"), groupingGroup);
+    QLabel* stockLengthHint = new QLabel(QStringLiteral("同一次计算中的所有钢板统一使用上面的钢板长度。"), groupingGroup);
     stockLengthHint->setStyleSheet(QStringLiteral("color:#666666;"));
     groupingLayout->addWidget(stockLengthHint, 4, 0, 1, 4);
 
@@ -528,11 +533,11 @@ void MainWindow::buildParameterDialog()
     routingLayout->addWidget(mediumWidthsEdit_, 1, 1, 1, 3);
     routingLayout->addWidget(new QLabel(QStringLiteral("大径机器接焊宽度范围"), routingGroup), 2, 0);
     routingLayout->addWidget(largeWidthsEdit_, 2, 1, 1, 3);
-    QLabel* routingHint = new QLabel(
-        QStringLiteral("保留小径、中径和大径的范围区分，当前计算仍只处理小径，中径和大径在套料前过滤"),
-        routingGroup);
-    routingHint->setStyleSheet(QStringLiteral("color:#666666;"));
-    routingLayout->addWidget(routingHint, 3, 0, 1, 4);
+    // QLabel* routingHint = new QLabel(
+    //     QStringLiteral("保留小径、中径和大径的范围区分，当前计算仍只处理小径，中径和大径在套料前过滤"),
+    //     routingGroup);
+    // routingHint->setStyleSheet(QStringLiteral("color:#666666;"));
+    // routingLayout->addWidget(routingHint, 3, 0, 1, 4);
     nestingLayout->addWidget(groupingGroup);
     nestingLayout->addWidget(routingGroup);
     nestingLayout->addStretch();
@@ -608,11 +613,9 @@ void MainWindow::buildParameterDialog()
     flowTimingLayout->addWidget(robotWeldFixedSpin_, 3, 3);
     flowTimingLayout->addWidget(new QLabel(QStringLiteral("机器单道焊接速度(mm/s)"), flowTimingGroup), 4, 0);
     flowTimingLayout->addWidget(robotWeldSpeedSpin_, 4, 1);
-    QLabel* weldTimingHint = new QLabel(
-        QStringLiteral("人工和机器接焊均先加工外圈，再经中间缓冲区加工内圈，两道分别计算完整节拍"),
-        flowTimingGroup);
-    weldTimingHint->setStyleSheet(QStringLiteral("color:#666666;"));
-    flowTimingLayout->addWidget(weldTimingHint, 5, 0, 1, 4);
+    // QLabel* weldTimingHint = new QLabel(QStringLiteral("人工和机器接焊均先加工外圈，再经中间缓冲区加工内圈，两道分别计算完整节拍"), flowTimingGroup);
+    // weldTimingHint->setStyleSheet(QStringLiteral("color:#666666;"));
+    // flowTimingLayout->addWidget(weldTimingHint, 5, 0, 1, 4);
 
     QGroupBox* sawTimingGroup = new QGroupBox(QStringLiteral("圆锯切割节拍"), timingTab);
     QGridLayout* sawTimingLayout = new QGridLayout(sawTimingGroup);

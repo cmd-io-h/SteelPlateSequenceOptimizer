@@ -1,3 +1,9 @@
+/**
+ * @file SteelPlateModel.h
+ * @brief 定义导入数据、钢板工件、均衡指标和工作簿快照模型
+ * @author cmd-io-h
+ */
+
 #pragma once
 
 #include <QVariant>
